@@ -17,11 +17,27 @@ class HealthKitManager: ObservableObject {
         case denied
     }
     
-    enum SyncStatus {
+    enum SyncStatus: Equatable {
         case idle
         case syncing
         case completed(Int)
         case failed(Error?)
+        
+        static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
+            switch (lhs, rhs) {
+            case (.idle, .idle):
+                return true
+            case (.syncing, .syncing):
+                return true
+            case (.completed(let count1), .completed(let count2)):
+                return count1 == count2
+            case (.failed(_), .failed(_)):
+                // Consider all errors equal for comparison purposes
+                return true
+            default:
+                return false
+            }
+        }
     }
     
     func requestAuthorization() {

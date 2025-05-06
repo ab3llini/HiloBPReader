@@ -13,6 +13,7 @@ struct HeartRateChart: View {
                 EmptyChartView()
             } else {
                 Chart {
+                    // Point and line marks for each reading
                     ForEach(data) { reading in
                         LineMark(
                             x: .value("Date", reading.date),
@@ -35,28 +36,33 @@ struct HeartRateChart: View {
                         .foregroundStyle(.red)
                     }
                     
-                    // Area under the line
-                    AreaMark(
-                        x: .value("Date", data.map { $0.date }),
-                        y: .value("HR", data.map { $0.heartRate })
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.red.opacity(0.3), .clear],
-                            startPoint: .top,
-                            endPoint: .bottom
+                    // Area mark for each reading
+                    ForEach(data) { reading in
+                        AreaMark(
+                            x: .value("Date", reading.date),
+                            y: .value("HR", reading.heartRate)
                         )
-                    )
-                    .interpolationMethod(.catmullRom)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.red.opacity(0.3), .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.catmullRom)
+                    }
                     
                     // Reference range
-                    RectangleMark(
-                        xStart: .automatic,
-                        xEnd: .automatic,
-                        yStart: .value("Normal Min", 60),
-                        yEnd: .value("Normal Max", 80)
-                    )
-                    .foregroundStyle(.green.opacity(0.1))
+                    if let minDate = data.map({ $0.date }).min(),
+                       let maxDate = data.map({ $0.date }).max() {
+                        RectangleMark(
+                            xStart: .value("Start", minDate),
+                            xEnd: .value("End", maxDate),
+                            yStart: .value("Normal Min", 60),
+                            yEnd: .value("Normal Max", 80)
+                        )
+                        .foregroundStyle(.green.opacity(0.1))
+                    }
                 }
                 .chartYScale(domain: 40...100)
                 .chartYAxis {

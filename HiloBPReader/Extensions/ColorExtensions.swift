@@ -1,10 +1,7 @@
 import SwiftUI
 
 extension Color {
-    static let mainBackground = Color("MainBackground", bundle: nil)
-    static let secondaryBackground = Color("SecondaryBackground", bundle: nil)
-    static let cardBackground = Color("CardBackground", bundle: nil)
-    
+
     // Default dark mode colors if custom ones aren't set
     static func defaultColor(_ named: String) -> Color {
         Color(named, bundle: nil)

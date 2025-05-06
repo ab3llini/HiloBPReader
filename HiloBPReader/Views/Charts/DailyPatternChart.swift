@@ -42,20 +42,20 @@ struct DailyPatternChart: View {
                         }
                     }
                     
-                    // Background time periods
+                    // Background time periods - with explicit y-axis values
                     RectangleMark(
                         xStart: .value("Sleep Start", 0),
                         xEnd: .value("Sleep End", 6),
-                        yStart: .automatic,
-                        yEnd: .automatic
+                        yStart: .value("Min Y", 60),  // Explicit min value
+                        yEnd: .value("Max Y", 180)    // Explicit max value
                     )
                     .foregroundStyle(Color.purple.opacity(0.1))
                     
                     RectangleMark(
                         xStart: .value("Evening Start", 18),
                         xEnd: .value("Evening End", 24),
-                        yStart: .automatic,
-                        yEnd: .automatic
+                        yStart: .value("Min Y", 60),  // Explicit min value
+                        yEnd: .value("Max Y", 180)    // Explicit max value
                     )
                     .foregroundStyle(Color.purple.opacity(0.1))
                 }

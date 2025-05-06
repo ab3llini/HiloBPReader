@@ -16,21 +16,27 @@ struct BloodPressureLineChart: View {
             } else {
                 Chart {
                     // Threshold areas
-                    RectangleMark(
-                        xStart: .automatic,
-                        xEnd: .automatic,
-                        yStart: .value("Hypertension Stage 1", 140),
-                        yEnd: .value("Hypertension Stage 2", 160)
-                    )
-                    .foregroundStyle(Color.red.opacity(0.1))
+                    if let minDate = data.map({ $0.date }).min(),
+                       let maxDate = data.map({ $0.date }).max() {
+                        // Hypertension Stage 1 to 2 area
+                        RectangleMark(
+                            xStart: .value("Start", minDate),
+                            xEnd: .value("End", maxDate),
+                            yStart: .value("Hypertension Stage 1", 140),
+                            yEnd: .value("Hypertension Stage 2", 160)
+                        )
+                        .foregroundStyle(Color.red.opacity(0.1))
+                        
+                        // Elevated to Hypertension Stage 1 area
+                        RectangleMark(
+                            xStart: .value("Start", minDate),
+                            xEnd: .value("End", maxDate),
+                            yStart: .value("Elevated", 120),
+                            yEnd: .value("Hypertension Stage 1", 140)
+                        )
+                        .foregroundStyle(Color.orange.opacity(0.1))
+                    }
                     
-                    RectangleMark(
-                        xStart: .automatic,
-                        xEnd: .automatic,
-                        yStart: .value("Elevated", 120),
-                        yEnd: .value("Hypertension Stage 1", 140)
-                    )
-                    .foregroundStyle(Color.orange.opacity(0.1))
                     
                     // Systolic readings
                     ForEach(filteredData) { reading in
