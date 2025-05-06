@@ -1,17 +1,21 @@
-//
-//  HiloBPReaderApp.swift
-//  HiloBPReader
-//
-//  Created by Alberto Bellini on 06/05/25.
-//
-
 import SwiftUI
+import HealthKit
 
 @main
 struct HiloBPReaderApp: App {
+    @StateObject private var dataStore = DataStore()
+    @StateObject private var healthKitManager = HealthKitManager()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainView()
+                .environmentObject(dataStore)
+                .environmentObject(healthKitManager)
+                .preferredColorScheme(.dark)
+                .accentColor(Color("AccentColor"))
+                .onAppear {
+                    healthKitManager.requestAuthorization()
+                }
         }
     }
 }
