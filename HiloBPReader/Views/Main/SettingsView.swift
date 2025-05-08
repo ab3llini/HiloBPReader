@@ -1,6 +1,7 @@
 import SwiftUI
 import HealthKit
 
+
 struct SettingsView: View {
     @EnvironmentObject var healthKitManager: HealthKitManager
     @EnvironmentObject var dataStore: DataStore

@@ -1,28 +1,29 @@
 import SwiftUI
 
+// Extension for consistent app colors
 extension Color {
-
-    // Default dark mode colors if custom ones aren't set
-    static func defaultColor(_ named: String) -> Color {
-        Color(named, bundle: nil)
-            .defaultColor()
-    }
+    // Primary brand colors
+    static let primaryAccent = Color("AccentColor") // Your existing blue color
+    static let secondaryAccent = Color.blue
     
-    func defaultColor() -> Color {
-        let uiColor = UIColor(self)
-        if uiColor.description == "nil" {
-            // If the color does not exist, return a fallback
-            switch self {
-            case Color.mainBackground:
-                return Color(UIColor.systemBackground)
-            case Color.secondaryBackground:
-                return Color(UIColor.secondarySystemBackground)
-            case Color.cardBackground:
-                return Color(UIColor.tertiarySystemBackground)
-            default:
-                return self
-            }
-        }
-        return self
-    }
+    // Background hierarchy
+//    static let mainBackground = Color("MainBackground")
+//    static let secondaryBackground = Color("SecondaryBackground")
+//    static let cardBackground = Color("CardBackground")
+    
+    // Reading colors
+    static let systolicColor = Color.red
+    static let diastolicColor = Color.blue
+    static let heartRateColor = Color.pink
+    
+    // Classification colors - using SF symbols semantic colors
+    static let normalBP = Color.green
+    static let elevatedBP = Color.yellow
+    static let highBP1 = Color.orange
+    static let highBP2 = Color.red
+    static let crisisBP = Color(red: 0.8, green: 0, blue: 0)
+    
+    // Time of day colors
+    static let morningColor = Color.orange
+    static let eveningColor = Color.indigo
 }

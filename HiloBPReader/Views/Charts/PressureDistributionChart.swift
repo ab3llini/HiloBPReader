@@ -8,38 +8,84 @@ struct PressureDistributionChart: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("BP Distribution")
                 .font(.headline)
+                .padding(.leading, 4)
             
             if data.isEmpty {
                 EmptyChartView()
             } else {
                 Chart {
+                    // Systolic ranges
                     ForEach(systolicRanges) { range in
                         BarMark(
-                            x: .value("Range", "\(range.min)-\(range.max)"),
+                            x: .value("Range", range.id),
                             y: .value("Count", countReadings(in: range, isSystolic: true))
                         )
-                        .foregroundStyle(.red.opacity(0.7))
+                        .foregroundStyle(.red.opacity(0.8))
+                        .cornerRadius(4)
                     }
                     
+                    // Diastolic ranges
                     ForEach(diastolicRanges) { range in
                         BarMark(
-                            x: .value("Range", "\(range.min)-\(range.max)"),
+                            x: .value("Range", range.id + 10), // Offset to separate from systolic
                             y: .value("Count", countReadings(in: range, isSystolic: false))
                         )
-                        .foregroundStyle(.blue.opacity(0.7))
+                        .foregroundStyle(.blue.opacity(0.8))
+                        .cornerRadius(4)
                     }
                 }
                 .chartXAxis {
-                    AxisMarks {
-                        AxisValueLabel()
-                            .font(.caption)
+                    AxisMarks(position: .bottom, values: [1, 2, 3, 4, 5, 16, 17, 18, 19]) { value in
+                        AxisValueLabel {
+                            if let id = value.as(Int.self) {
+                                if id <= 5 {
+                                    let range = systolicRanges.first(where: { $0.id == id })
+                                    Text("\(range?.min ?? 0)-\(range?.max ?? 0)")
+                                        .font(.caption2)
+                                        .foregroundColor(.red)
+                                } else if id >= 16 {
+                                    let range = diastolicRanges.first(where: { $0.id + 10 == id })
+                                    Text("\(range?.min ?? 0)-\(range?.max ?? 0)")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
                     }
                 }
-                .chartForegroundStyleScale([
-                    "Systolic": Color.red.opacity(0.7),
-                    "Diastolic": Color.blue.opacity(0.7)
-                ])
-                .chartLegend(position: .bottom)
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let count = value.as(Int.self) {
+                                Text("\(count)")
+                                    .font(.caption2)
+                            }
+                        }
+                    }
+                }
+                .chartLegend(position: .bottom) {
+                    HStack(spacing: 20) {
+                        HStack(spacing: 4) {
+                            Rectangle()
+                                .fill(.red.opacity(0.8))
+                                .frame(width: 12, height: 12)
+                            Text("Systolic")
+                                .font(.caption)
+                        }
+                        
+                        HStack(spacing: 4) {
+                            Rectangle()
+                                .fill(.blue.opacity(0.8))
+                                .frame(width: 12, height: 12)
+                            Text("Diastolic")
+                                .font(.caption)
+                        }
+                    }
+                }
+                .frame(height: 180)
+                .padding(.top, 4)
             }
         }
     }
@@ -69,11 +115,4 @@ struct PressureDistributionChart: View {
             return value >= range.min && value <= range.max
         }.count
     }
-}
-
-struct BPRange: Identifiable {
-    let id: Int
-    let min: Int
-    let max: Int
-    let label: String
 }

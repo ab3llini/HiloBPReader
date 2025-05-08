@@ -7,9 +7,10 @@ struct ReadingCard: View {
         VStack(alignment: .leading, spacing: 12) {
             // Time and type indicator
             HStack {
-                Text(formattedTime)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(reading.time)
+                    .font(.callout)
+                    .fontWeight(.medium)
+                
                 Spacer()
                 
                 if reading.readingType != .normal {
@@ -22,36 +23,38 @@ struct ReadingCard: View {
             // BP and HR values
             HStack(alignment: .bottom, spacing: 16) {
                 // Systolic
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("\(reading.systolic)")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 34, weight: .bold))
                         .foregroundColor(systolicColor)
                     Text("SYS")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 // Diastolic
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("\(reading.diastolic)")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 34, weight: .bold))
                         .foregroundColor(diastolicColor)
                     Text("DIA")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
+                Spacer()
+                
                 // Heart rate
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 2) {
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 4) {
                         Image(systemName: "heart.fill")
                             .font(.caption)
                             .foregroundColor(.red.opacity(0.8))
                         Text("\(reading.heartRate)")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 22, weight: .bold))
                     }
                     Text("BPM")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
@@ -61,16 +64,13 @@ struct ReadingCard: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding()
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.secondaryBackground)
+                .fill(Color(UIColor.secondarySystemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
         )
-        .frame(width: 160)
-    }
-    
-    private var formattedTime: String {
-        return reading.time
+        .frame(width: 180)
     }
     
     private var formattedDate: String {
@@ -84,6 +84,8 @@ struct ReadingCard: View {
             return .red
         } else if reading.systolic >= 130 {
             return .orange
+        } else if reading.systolic >= 120 {
+            return .yellow
         } else {
             return .green
         }

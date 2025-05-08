@@ -10,68 +10,101 @@ struct BloodPressureLineChart: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Blood Pressure Trend")
                 .font(.headline)
+                .padding(.leading, 4)
             
             if data.isEmpty {
                 EmptyChartView()
             } else {
                 Chart {
-                    // Threshold areas
+                    // Background zones - green to red gradient for classification
                     if let minDate = data.map({ $0.date }).min(),
                        let maxDate = data.map({ $0.date }).max() {
-                        // Hypertension Stage 1 to 2 area
+                        // Normal (<120)
                         RectangleMark(
                             xStart: .value("Start", minDate),
                             xEnd: .value("End", maxDate),
-                            yStart: .value("Hypertension Stage 1", 140),
-                            yEnd: .value("Hypertension Stage 2", 160)
+                            yStart: .value("Min", 60),
+                            yEnd: .value("Normal", 120)
                         )
-                        .foregroundStyle(Color.red.opacity(0.1))
+                        .foregroundStyle(Color.green.opacity(0.1))
                         
-                        // Elevated to Hypertension Stage 1 area
+                        // Elevated (120-129)
                         RectangleMark(
                             xStart: .value("Start", minDate),
                             xEnd: .value("End", maxDate),
-                            yStart: .value("Elevated", 120),
-                            yEnd: .value("Hypertension Stage 1", 140)
+                            yStart: .value("Normal", 120),
+                            yEnd: .value("Elevated", 130)
+                        )
+                        .foregroundStyle(Color.yellow.opacity(0.1))
+                        
+                        // Stage 1 (130-139)
+                        RectangleMark(
+                            xStart: .value("Start", minDate),
+                            xEnd: .value("End", maxDate),
+                            yStart: .value("Elevated", 130),
+                            yEnd: .value("Stage 1", 140)
                         )
                         .foregroundStyle(Color.orange.opacity(0.1))
-                    }
-                    
-                    
-                    // Systolic readings
-                    ForEach(filteredData) { reading in
-                        PointMark(
-                            x: .value("Date", reading.date),
-                            y: .value("SYS", reading.systolic)
-                        )
-                        .foregroundStyle(isEvening(reading) ? .orange.opacity(0.8) : .red.opacity(0.8))
-                        .symbol(isEvening(reading) ? .diamond : .circle)
                         
-                        LineMark(
-                            x: .value("Date", reading.date),
-                            y: .value("SYS", reading.systolic)
+                        // Stage 2+ (140+)
+                        RectangleMark(
+                            xStart: .value("Start", minDate),
+                            xEnd: .value("End", maxDate),
+                            yStart: .value("Stage 1", 140),
+                            yEnd: .value("Max", 180)
                         )
-                        .foregroundStyle(.red.opacity(0.6))
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(Color.red.opacity(0.1))
                     }
                     
-                    // Diastolic readings
-                    ForEach(filteredData) { reading in
+                    // IMPORTANT: Sort data chronologically and use separate element arrays for clean lines
+                    let sortedData = data.sorted(by: { $0.date < $1.date })
+                    
+                    // Diastolic line
+                    let diastolicData = sortedData.filter { reading in
+                        let hour = Calendar.current.component(.hour, from: reading.date)
+                        let isMorning = hour >= 5 && hour < 12
+                        let isEvening = hour >= 17 && hour < 23
+                        
+                        return (isMorning && showMorning) ||
+                               (isEvening && showEvening) ||
+                               (!isMorning && !isEvening)
+                    }
+                    
+                    ForEach(Array(diastolicData.enumerated()), id: \.element.id) { index, reading in
+                        if index > 0 {
+                            LineMark(
+                                x: .value("Date", reading.date),
+                                y: .value("DIA", reading.diastolic)
+                            )
+                            .foregroundStyle(Color.blue)
+                            .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        }
+                        
                         PointMark(
                             x: .value("Date", reading.date),
                             y: .value("DIA", reading.diastolic)
                         )
-                        .foregroundStyle(isEvening(reading) ? .indigo.opacity(0.8) : .blue.opacity(0.8))
-                        .symbol(isEvening(reading) ? .diamond : .circle)
+                        .foregroundStyle(isEvening(reading) ? Color.indigo : Color.blue)
+                        .symbolSize(30)
+                    }
+                    
+                    // Systolic line (in separate loop to prevent connecting to diastolic)
+                    ForEach(Array(diastolicData.enumerated()), id: \.element.id) { index, reading in
+                        if index > 0 {
+                            LineMark(
+                                x: .value("Date", reading.date),
+                                y: .value("SYS", reading.systolic)
+                            )
+                            .foregroundStyle(Color.red)
+                            .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        }
                         
-                        LineMark(
+                        PointMark(
                             x: .value("Date", reading.date),
-                            y: .value("DIA", reading.diastolic)
+                            y: .value("SYS", reading.systolic)
                         )
-                        .foregroundStyle(.blue.opacity(0.6))
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(isEvening(reading) ? Color.pink : Color.red)
+                        .symbolSize(30)
                     }
                     
                     // Reference lines
@@ -85,37 +118,77 @@ struct BloodPressureLineChart: View {
                 }
                 .chartYScale(domain: 40...180)
                 .chartYAxis {
-                    AxisMarks(preset: .extended, position: .leading)
+                    AxisMarks(position: .leading, values: .stride(by: 20)) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let intValue = value.as(Int.self) {
+                                Text("\(intValue)")
+                                    .font(.caption)
+                            }
+                        }
+                    }
                 }
                 .chartXAxis {
-                    AxisMarks(preset: .automatic)
+                    AxisMarks(values: .stride(by: calculateStride(for: data))) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        if let date = value.as(Date.self) {
+                            AxisValueLabel {
+                                Text(formatDateForAxis(date))
+                                    .font(.caption)
+                            }
+                        }
+                    }
                 }
-                .chartLegend(position: .bottom)
+                .frame(height: 240)
+                .padding(.top, 8)
             }
-        }
-    }
-    
-    private var filteredData: [BloodPressureReading] {
-        data.filter { reading in
-            let hour = Calendar.current.component(.hour, from: reading.date)
-            let isMorning = hour >= 5 && hour < 12
-            let isEvening = hour >= 17 && hour < 23
-            
-            if isMorning && showMorning {
-                return true
-            }
-            if isEvening && showEvening {
-                return true
-            }
-            if !isMorning && !isEvening {
-                return true
-            }
-            return false
         }
     }
     
     private func isEvening(_ reading: BloodPressureReading) -> Bool {
         let hour = Calendar.current.component(.hour, from: reading.date)
         return hour >= 17 && hour < 23
+    }
+    
+    private func calculateStride(for data: [BloodPressureReading]) -> Calendar.Component {
+        // Find time range
+        guard let oldest = data.map({ $0.date }).min(),
+              let newest = data.map({ $0.date }).max() else {
+            return .day
+        }
+        
+        let timeSpan = newest.timeIntervalSince(oldest)
+        let days = timeSpan / (60 * 60 * 24)
+        
+        if days < 1 {
+            return .hour
+        } else if days < 7 {
+            return .day
+        } else if days < 30 {
+            return .weekOfMonth
+        } else {
+            return .month
+        }
+    }
+    
+    private func formatDateForAxis(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        
+        switch calculateStride(for: data) {
+        case .hour:
+            formatter.dateFormat = "HH:mm"
+        case .day:
+            formatter.dateFormat = "d MMM"
+        case .weekOfMonth:
+            formatter.dateFormat = "d MMM"
+        case .month:
+            formatter.dateFormat = "MMM"
+        default:
+            formatter.dateFormat = "d MMM"
+        }
+        
+        return formatter.string(from: date)
     }
 }

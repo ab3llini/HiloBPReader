@@ -2,10 +2,53 @@ import Foundation
 import Combine
 
 class DataStore: ObservableObject {
-    @Published var allReadings: [BloodPressureReading] = []
-    @Published var currentReport: BloodPressureReport?
+    @Published var allReadings: [BloodPressureReading] = [] {
+        didSet {
+            saveData()
+        }
+    }
+    @Published var currentReport: BloodPressureReport? {
+        didSet {
+            saveData()
+        }
+    }
     
-    // Computed properties for the UI
+    private let userDefaults = UserDefaults.standard
+    private let readingsKey = "com.hilobpreader.readings"
+    private let reportKey = "com.hilobpreader.currentReport"
+    
+    init() {
+        loadData()
+    }
+    
+    // MARK: - Data Persistence
+    
+    private func loadData() {
+        if let savedReadings = userDefaults.data(forKey: readingsKey),
+           let decodedReadings = try? JSONDecoder().decode([BloodPressureReading].self, from: savedReadings) {
+            allReadings = decodedReadings
+        }
+        
+        if let savedReport = userDefaults.data(forKey: reportKey),
+           let decodedReport = try? JSONDecoder().decode(BloodPressureReport.self, from: savedReport) {
+            currentReport = decodedReport
+        }
+    }
+    
+    private func saveData() {
+        if let encoded = try? JSONEncoder().encode(allReadings) {
+            userDefaults.set(encoded, forKey: readingsKey)
+        }
+        
+        if let report = currentReport, let encoded = try? JSONEncoder().encode(report) {
+            userDefaults.set(encoded, forKey: reportKey)
+        } else {
+            userDefaults.removeObject(forKey: reportKey)
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
     var recentReadings: [BloodPressureReading] {
         return Array(allReadings.sorted(by: { $0.date > $1.date }).prefix(10))
     }
@@ -149,28 +192,5 @@ class DataStore: ObservableObject {
             // Add new readings to our collection
             allReadings.append(contentsOf: uniqueNewReadings)
         }
-    }
-}
-
-// Stats model for BP averages
-struct BPStats {
-    let systolicMean: Int
-    let diastolicMean: Int
-    let heartRateMean: Int
-}
-
-// Model for hourly BP data
-struct HourlyBPData: Identifiable {
-    let id = UUID()
-    let hour: Int
-    let systolicAverage: Int
-    let diastolicAverage: Int
-    let readingCount: Int
-    
-    var hourString: String {
-        let hourInt = hour % 12
-        let hourText = hourInt == 0 ? "12" : "\(hourInt)"
-        let ampm = hour < 12 ? "AM" : "PM"
-        return "\(hourText) \(ampm)"
     }
 }

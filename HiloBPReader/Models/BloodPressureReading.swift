@@ -1,7 +1,7 @@
 import Foundation
 
-struct BloodPressureReading: Identifiable {
-    let id = UUID()
+struct BloodPressureReading: Identifiable, Codable {
+    let id: UUID
     let date: Date
     let time: String
     let systolic: Int
@@ -9,7 +9,7 @@ struct BloodPressureReading: Identifiable {
     let heartRate: Int
     let readingType: ReadingType
     
-    enum ReadingType: String {
+    enum ReadingType: String, Codable {
         case normal = ""
         case initialization = "Initialization with cuff"
         case cuffMeasurement = "Cuff measurement"
@@ -20,5 +20,16 @@ struct BloodPressureReading: Identifiable {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return "\(formatter.string(from: date)) \(time)"
+    }
+    
+    // Custom initializer to keep the existing constructor pattern
+    init(date: Date, time: String, systolic: Int, diastolic: Int, heartRate: Int, readingType: ReadingType) {
+        self.id = UUID()
+        self.date = date
+        self.time = time
+        self.systolic = systolic
+        self.diastolic = diastolic
+        self.heartRate = heartRate
+        self.readingType = readingType
     }
 }
