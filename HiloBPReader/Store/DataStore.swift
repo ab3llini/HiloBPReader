@@ -2,107 +2,12 @@ import Foundation
 import Combine
 
 class DataStore: ObservableObject {
-    @Published var allReadings: [BloodPressureReading] = [] {
-        didSet {
-            saveData()
-        }
-    }
-    @Published var currentReport: BloodPressureReport? {
-        didSet {
-            saveData()
-        }
-    }
+    @Published var allReadings: [BloodPressureReading] = []
+    @Published var currentReport: BloodPressureReport?
     
-    private let userDefaults = UserDefaults.standard
-    private let readingsKey = "com.hilobpreader.readings"
-    private let reportKey = "com.hilobpreader.currentReport"
-    
-    init() {
-        loadData()
-    }
-    
-    // MARK: - Data Persistence
-    
-    private func loadData() {
-        if let savedReadings = userDefaults.data(forKey: readingsKey),
-           let decodedReadings = try? JSONDecoder().decode([BloodPressureReading].self, from: savedReadings) {
-            allReadings = decodedReadings
-        }
-        
-        if let savedReport = userDefaults.data(forKey: reportKey),
-           let decodedReport = try? JSONDecoder().decode(BloodPressureReport.self, from: savedReport) {
-            currentReport = decodedReport
-        }
-    }
-    
-    private func saveData() {
-        if let encoded = try? JSONEncoder().encode(allReadings) {
-            userDefaults.set(encoded, forKey: readingsKey)
-        }
-        
-        if let report = currentReport, let encoded = try? JSONEncoder().encode(report) {
-            userDefaults.set(encoded, forKey: reportKey)
-        } else {
-            userDefaults.removeObject(forKey: reportKey)
-        }
-    }
-    
-    // MARK: - Computed Properties
-    
+    // Computed properties for the UI
     var recentReadings: [BloodPressureReading] {
         return Array(allReadings.sorted(by: { $0.date > $1.date }).prefix(10))
-    }
-    
-    var weeklyTrend: [DailyBPData] {
-        // Group readings by day and calculate averages
-        let calendar = Calendar.current
-        let endDate = Date()
-        let startDate = calendar.date(byAdding: .day, value: -7, to: endDate)!
-        
-        var result: [DailyBPData] = []
-        
-        // Create date for each day in range
-        var currentDate = startDate
-        while currentDate <= endDate {
-            let dayStart = calendar.startOfDay(for: currentDate)
-            let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart)!
-            
-            // Filter readings for this day
-            let dayReadings = allReadings.filter {
-                $0.date >= dayStart && $0.date < dayEnd
-            }
-            
-            if !dayReadings.isEmpty {
-                // Calculate averages
-                let sysAvg = Int(dayReadings.map { Double($0.systolic) }.reduce(0, +) / Double(dayReadings.count))
-                let diaAvg = Int(dayReadings.map { Double($0.diastolic) }.reduce(0, +) / Double(dayReadings.count))
-                let hrAvg = Int(dayReadings.map { Double($0.heartRate) }.reduce(0, +) / Double(dayReadings.count))
-                
-                let dailyData = DailyBPData(
-                    date: dayStart,
-                    systolicAverage: sysAvg,
-                    diastolicAverage: diaAvg,
-                    heartRateAverage: hrAvg,
-                    readingCount: dayReadings.count
-                )
-                
-                result.append(dailyData)
-            } else {
-                // Add empty day for continuity
-                result.append(DailyBPData(
-                    date: dayStart,
-                    systolicAverage: 0,
-                    diastolicAverage: 0,
-                    heartRateAverage: 0,
-                    readingCount: 0
-                ))
-            }
-            
-            // Move to next day
-            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
-        }
-        
-        return result.filter { $0.readingCount > 0 }
     }
     
     var latestStats: BPStats {
@@ -128,69 +33,44 @@ class DataStore: ObservableObject {
         )
     }
     
-    var hourlyAverages: [HourlyBPData] {
-        // Group readings by hour and calculate averages
-        var hourlyData: [Int: [BloodPressureReading]] = [:]
-        
-        for reading in allReadings {
-            let hour = Calendar.current.component(.hour, from: reading.date)
-            if hourlyData[hour] == nil {
-                hourlyData[hour] = [reading]
-            } else {
-                hourlyData[hour]?.append(reading)
-            }
-        }
-        
-        return hourlyData.map { hour, readings in
-            let sysAvg = Int(readings.map { Double($0.systolic) }.reduce(0, +) / Double(readings.count))
-            let diaAvg = Int(readings.map { Double($0.diastolic) }.reduce(0, +) / Double(readings.count))
-            
-            return HourlyBPData(
-                hour: hour,
-                systolicAverage: sysAvg,
-                diastolicAverage: diaAvg,
-                readingCount: readings.count
-            )
-        }.sorted { $0.hour < $1.hour }
-    }
-    
-    // Filter readings based on time frame
-    func filteredReadings(for timeFrame: TimeFrame) -> [BloodPressureReading] {
-        let calendar = Calendar.current
-        let endDate = Date()
-        var startDate: Date
-        
-        switch timeFrame {
-        case .day:
-            startDate = calendar.date(byAdding: .day, value: -1, to: endDate)!
-        case .week:
-            startDate = calendar.date(byAdding: .day, value: -7, to: endDate)!
-        case .month:
-            startDate = calendar.date(byAdding: .month, value: -1, to: endDate)!
-        case .year:
-            startDate = calendar.date(byAdding: .year, value: -1, to: endDate)!
-        }
-        
-        return allReadings.filter { $0.date >= startDate && $0.date <= endDate }
-            .sorted(by: { $0.date < $1.date })
-    }
-    
     func setCurrentReport(_ report: BloodPressureReport?) {
         currentReport = report
         
         if let report = report {
-            // Filter out duplicates when adding new readings
-            let existingReadingIds = Set(allReadings.map {
-                "\($0.date.timeIntervalSince1970)-\($0.systolic)-\($0.diastolic)"
-            })
-            
-            let uniqueNewReadings = report.readings.filter { reading in
-                let id = "\(reading.date.timeIntervalSince1970)-\(reading.systolic)-\(reading.diastolic)"
-                return !existingReadingIds.contains(id)
-            }
-            
-            // Add new readings to our collection
-            allReadings.append(contentsOf: uniqueNewReadings)
+            // Add new readings to our collection with deduplication
+            addReadings(report.readings)
         }
     }
+    
+    /// Add readings to the data store with automatic deduplication
+    func addReadings(_ newReadings: [BloodPressureReading]) {
+        // Create a set of existing reading IDs for O(1) lookup
+        let existingReadingIds = Set(allReadings.map { createReadingIdentifier($0) })
+        
+        // Filter out duplicate readings
+        let uniqueNewReadings = newReadings.filter { reading in
+            let id = createReadingIdentifier(reading)
+            return !existingReadingIds.contains(id)
+        }
+        
+        // Add only unique readings
+        if !uniqueNewReadings.isEmpty {
+            allReadings.append(contentsOf: uniqueNewReadings)
+            
+            // Sort readings by date (newest first) after adding new ones
+            allReadings.sort(by: { $0.date > $1.date })
+        }
+    }
+    
+    /// Create a unique identifier for a reading based on date, time and values
+    private func createReadingIdentifier(_ reading: BloodPressureReading) -> String {
+        return "\(reading.date.timeIntervalSince1970)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
+    }
+}
+
+// Stats model for BP averages
+struct BPStats {
+    let systolicMean: Int
+    let diastolicMean: Int
+    let heartRateMean: Int
 }

@@ -11,24 +11,12 @@ struct MainView: View {
                 }
                 .tag(0)
             
-            ReportsView()
-                .tabItem {
-                    Label("Reports", systemImage: "doc.text.fill")
-                }
-                .tag(1)
-            
-            ChartsView()
-                .tabItem {
-                    Label("Trends", systemImage: "chart.xyaxis.line")
-                }
-                .tag(2)
-            
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(1)
         }
-        .tint(.teal)
+        .tint(Color("AccentColor"))
     }
 }

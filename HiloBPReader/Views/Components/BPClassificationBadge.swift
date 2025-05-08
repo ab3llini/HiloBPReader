@@ -12,7 +12,7 @@ struct BPClassificationBadge: View {
             
             Text(classificationText)
                 .font(.headline)
-                .foregroundColor(.white)
+                .foregroundColor(classificationColor)
             
             Spacer()
             

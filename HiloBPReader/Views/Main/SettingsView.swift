@@ -1,7 +1,6 @@
 import SwiftUI
 import HealthKit
 
-
 struct SettingsView: View {
     @EnvironmentObject var healthKitManager: HealthKitManager
     @EnvironmentObject var dataStore: DataStore
@@ -23,18 +22,11 @@ struct SettingsView: View {
                     .disabled(healthKitManager.authorizationStatus == .authorized)
                 }
                 
-                Section(header: Text("App Settings")) {
-                    Toggle("Dark Mode", isOn: .constant(true))
-                        .disabled(true) // We're always in dark mode for now
-                    
-                    Toggle("Show Systolic", isOn: .constant(true))
-                        .disabled(true)
-                    
-                    Toggle("Show Diastolic", isOn: .constant(true))
-                        .disabled(true)
-                }
-                
                 Section(header: Text("Data Management")) {
+                    NavigationLink(destination: AllReadingsView()) {
+                        Label("View All Readings", systemImage: "list.bullet")
+                    }
+                    
                     Button(role: .destructive) {
                         showingClearConfirmation = true
                     } label: {
@@ -48,6 +40,18 @@ struct SettingsView: View {
                         Spacer()
                         Text("1.0.0")
                             .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("Current Report")
+                        Spacer()
+                        if let report = dataStore.currentReport {
+                            Text("\(report.month) \(report.year) (\(report.readings.count) readings)")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("None")
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     Link(destination: URL(string: "https://hilo.com")!) {

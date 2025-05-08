@@ -10,7 +10,6 @@ struct ImportView: View {
     @State private var importStatus: ImportStatus = .idle
     @State private var importedReport: BloodPressureReport?
     @State private var duplicateCount = 0
-    @State private var isAnimating = false
     
     enum ImportStatus {
         case idle, processing, success, failure
@@ -18,178 +17,30 @@ struct ImportView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
+            VStack {
                 // Status display
                 statusView
-                    .padding(.vertical, 24)
                 
                 // PDF preview if available
                 if let url = pdfURL, importStatus == .success {
-                    Text("Report Preview")
-                        .font(.headline)
-                        .padding(.top)
-                    
                     PDFPreview(url: url)
-                        .frame(height: 280)
-                        .padding(.horizontal)
-                        .clipped()
-                        .cornerRadius(8)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                        .padding([.horizontal, .bottom])
+                        .frame(height: 300)
+                        .padding()
                 }
                 
                 // Import results
                 if let report = importedReport {
-                    VStack {
-                        Text("Import Summary")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
-                        
-                        HStack(spacing: 12) {
-                            // Readings
-                            VStack(spacing: 8) {
-                                Image(systemName: "list.bullet")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.blue)
-                                
-                                Text("\(report.readings.count)")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                
-                                Text("Readings")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(12)
-                            
-                            // Date Range
-                            VStack(spacing: 8) {
-                                Image(systemName: "calendar")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.purple)
-                                
-                                Text(dateRange)
-                                    .font(.subheadline)
-                                    .fontWeight(.bold)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                
-                                Text("Date Range")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.purple.opacity(0.1))
-                            .cornerRadius(12)
-                            
-                            // Duplicates
-                            VStack(spacing: 8) {
-                                Image(systemName: duplicateCount > 0 ? "exclamationmark.triangle" : "checkmark.circle")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(duplicateCount > 0 ? .orange : .green)
-                                
-                                Text("\(duplicateCount)")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                
-                                Text("Duplicates")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background((duplicateCount > 0 ? Color.orange : Color.green).opacity(0.1))
-                            .cornerRadius(12)
-                        }
-                        .padding(.horizontal)
-                        
-                        if duplicateCount > 0 {
-                            Text("Note: \(duplicateCount) readings appear to be duplicates of readings you've already imported. These will be skipped.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-                        }
-                        
-                        HStack(spacing: 20) {
-                            Label("User: \(report.memberName)", systemImage: "person")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            if !report.gender.isEmpty && report.gender != "Unknown" {
-                                Label(report.gender, systemImage: "figure.stand")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.top, 12)
-                    }
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(16)
-                    .padding([.horizontal, .bottom])
+                    importSummaryView(report: report)
                 }
                 
                 Spacer()
                 
                 // Action buttons
-                VStack(spacing: 16) {
-                    if importStatus == .idle || importStatus == .failure {
-                        Button {
-                            isShowingDocumentPicker = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "doc.badge.plus")
-                                Text(importStatus == .idle ? "Select PDF Report" : "Try Different PDF")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
-                        }
-                        .padding(.horizontal)
-                    } else if importStatus == .success {
-                        HStack(spacing: 16) {
-                            Button {
-                                isShowingDocumentPicker = true
-                            } label: {
-                                Text("Different PDF")
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color(UIColor.secondarySystemFill))
-                                    .foregroundColor(.primary)
-                                    .cornerRadius(12)
-                            }
-                            
-                            Button {
-                                dataStore.setCurrentReport(importedReport)
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "checkmark")
-                                    Text("Import Report")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-                .padding(.bottom, 24)
+                actionButtons
             }
-            .background(Color(UIColor.systemBackground).ignoresSafeArea())
-            .navigationTitle("Import BP Report")
+            .padding()
+            .background(Color.mainBackground.ignoresSafeArea())
+            .navigationTitle("Import Report")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -197,6 +48,7 @@ struct ImportView: View {
                         dismiss()
                     }
                 }
+                // Removed redundant Done button from navigation bar
             }
             .sheet(isPresented: $isShowingDocumentPicker) {
                 PDFPickerView { url in
@@ -211,96 +63,162 @@ struct ImportView: View {
         VStack(spacing: 15) {
             switch importStatus {
             case .idle:
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
                     Image(systemName: "doc.viewfinder")
-                        .font(.system(size: 60))
-                        .foregroundColor(.blue)
+                        .font(.system(size: 70))
+                        .foregroundColor(.accentColor)
                     
-                    Text("Import Your BP Report")
+                    Text("Import Your Hilo Report")
                         .font(.title2)
                         .fontWeight(.semibold)
                     
-                    Text("Select a Hilo or Aktiia blood pressure PDF report to import your readings")
+                    Text("Select a Hilo blood pressure PDF report to import your readings.")
                         .multilineTextAlignment(.center)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal)
                 }
+                .padding(.vertical, 40)
                 
             case .processing:
-                ZStack {
-                    Circle()
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 6)
-                        .frame(width: 60, height: 60)
+                VStack {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .padding()
                     
-                    Circle()
-                        .trim(from: 0, to: 0.75)
-                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .frame(width: 60, height: 60)
-                        .rotationEffect(Angle(degrees: isAnimating ? 360 : 0))
-                        .onAppear {
-                            withAnimation(Animation.linear(duration: 1).repeatForever(autoreverses: false)) {
-                                isAnimating = true
-                            }
-                        }
+                    Text("Analyzing your report...")
+                        .foregroundColor(.secondary)
                 }
-                
-                Text("Analyzing your report...")
-                    .font(.headline)
-                
-                Text("Looking for blood pressure readings and metadata")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                .frame(height: 200)
                 
             case .success:
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 70, height: 70)
-                        
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    Text("Report Analyzed Successfully")
-                        .font(.headline)
-                    
-                    if let report = importedReport {
-                        Text("Found \(report.readings.count) readings for \(report.memberName)")
-                            .foregroundColor(.secondary)
-                    }
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Import successful!")
+                        .fontWeight(.semibold)
                 }
                 
             case .failure:
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 70, height: 70)
-                        
-                        Image(systemName: "exclamationmark")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    Text("Could Not Process Report")
-                        .font(.headline)
-                    
-                    Text("The selected file may not be a valid Hilo or Aktiia BP report")
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                    Text("Failed to process report")
+                        .fontWeight(.semibold)
                 }
             }
         }
     }
     
-    private var dateRange: String {
-        guard let report = importedReport,
-              let firstDate = report.readings.map({ $0.date }).min(),
+    private var actionButtons: some View {
+        // When it's the initial state, show a select button
+        // When it's successful, show a done button
+        // No "select different" or additional sync button needed
+        
+        if importStatus == .idle {
+            // Initial select button
+            Button {
+                isShowingDocumentPicker = true
+            } label: {
+                HStack {
+                    Image(systemName: "doc.badge.plus")
+                    Text("Select PDF")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        } else if importStatus == .success {
+            // After success, just provide a done button
+            Button {
+                dataStore.setCurrentReport(importedReport)
+                dismiss()
+            } label: {
+                HStack {
+                    Image(systemName: "checkmark")
+                    Text("Done")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        } else {
+            // For failure or processing, allow retrying
+            Button {
+                isShowingDocumentPicker = true
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Try Again")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        }
+    }
+    
+    private func importSummaryView(report: BloodPressureReport) -> some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("Import Summary")
+                .font(.headline)
+            
+            HStack(spacing: 10) {
+                // Readings count
+                dataBadge(
+                    value: "\(report.readings.count)",
+                    label: "Readings",
+                    color: .blue
+                )
+                
+                // Date range
+                dataBadge(
+                    value: dateRange(for: report),
+                    label: "Date Range",
+                    color: .purple
+                )
+                
+                if duplicateCount > 0 {
+                    // Duplicates
+                    dataBadge(
+                        value: "\(duplicateCount)",
+                        label: "Duplicates",
+                        color: .orange
+                    )
+                }
+            }
+            
+            if duplicateCount > 0 {
+                Text("Note: \(duplicateCount) readings appear to be duplicates of readings you've already imported. These will be skipped to avoid duplicates in Apple Health.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+            }
+            
+            HStack(spacing: 20) {
+                Label("User: \(report.memberName)", systemImage: "person")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                if !report.gender.isEmpty && report.gender != "Unknown" {
+                    Label(report.gender, systemImage: "figure.stand")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.top, 4)
+        }
+        .padding()
+        .background(Color.secondaryBackground)
+        .cornerRadius(12)
+    }
+    
+    private func dateRange(for report: BloodPressureReport) -> String {
+        guard let firstDate = report.readings.map({ $0.date }).min(),
               let lastDate = report.readings.map({ $0.date }).max() else {
             return "N/A"
         }
@@ -311,11 +229,27 @@ struct ImportView: View {
         return "\(dateFormatter.string(from: firstDate)) - \(dateFormatter.string(from: lastDate))"
     }
     
+    // Helper function for consistent data badges
+    private func dataBadge(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(color.opacity(0.1))
+        .cornerRadius(8)
+    }
+    
     private func processImport(url: URL) {
         importStatus = .processing
         
-        // Simulate processing delay for better UX
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // This would normally be on a background thread
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             let parser = PDFParserService()
             
             if let report = parser.parseHiloPDF(from: url) {
@@ -338,4 +272,6 @@ struct ImportView: View {
             }
         }
     }
+    
+    // Removed syncToHealthKit method as we're handling this on the main dashboard
 }
