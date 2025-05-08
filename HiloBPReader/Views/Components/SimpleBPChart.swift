@@ -10,6 +10,16 @@ struct SimpleBPChart: View {
     @State private var systolicStdDev: Double = 0
     @State private var diastolicMean: Double = 0
     @State private var diastolicStdDev: Double = 0
+    
+    // New states for scrolling functionality
+    @State private var dragOffset: CGFloat = 0
+    @State private var accumulatedOffset: CGFloat = 0
+    @State private var isScrolling = false
+    @State private var rangeStartDate: Date = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+    @State private var rangeEndDate: Date = Date()
+    
+    // For haptic feedback
+    let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -17,21 +27,72 @@ struct SimpleBPChart: View {
                 .font(.headline)
                 .padding(.leading)
             
-            // Stats info
+            // Chart with gesture
+            BPChartView(
+                data: processedData,
+                dateRange: dateRange
+            )
+            .gesture(
+                DragGesture()
+                    .onChanged { gesture in
+                        let newOffset = gesture.translation.width + accumulatedOffset
+                        dragOffset = newOffset
+                        
+                        // Calculate day offset (20 points per day as an example)
+                        let dayWidth: CGFloat = 20
+                        let dayOffset = Int(newOffset / dayWidth)
+                        
+                        // Update date range during drag
+                        let calendar = Calendar.current
+                        let initialStartDate = calendar.date(byAdding: .day, value: -30, to: Date())!
+                        let initialEndDate = Date()
+                        
+                        // Move the date range based on the drag
+                        let newStartDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialStartDate)!
+                        let newEndDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialEndDate)!
+                        
+                        // Only update if date has changed and give haptic feedback
+                        if !isScrolling || Int(accumulatedOffset / dayWidth) != Int(newOffset / dayWidth) {
+                            hapticFeedback.impactOccurred()
+                            isScrolling = true
+                        }
+                        
+                        rangeStartDate = newStartDate
+                        rangeEndDate = newEndDate
+                        dateRange = newStartDate...newEndDate
+                        
+                        // Process data for the new range
+                        processDataForRange(startDate: newStartDate, endDate: newEndDate)
+                    }
+                    .onEnded { _ in
+                        // Save the accumulated offset
+                        accumulatedOffset = dragOffset
+                        isScrolling = false
+                    }
+            )
+            
+            // Stats info - moved to bottom
             StatsInfoView(
                 systolicMean: systolicMean,
                 systolicStdDev: systolicStdDev,
                 diastolicMean: diastolicMean,
                 diastolicStdDev: diastolicStdDev
             )
-            
-            // Chart
-            BPChartView(
-                data: processedData,
-                dateRange: dateRange
-            )
+            .padding(.horizontal)
+            .padding(.top, 8)
         }
         .onAppear {
+            // Prepare haptic feedback
+            hapticFeedback.prepare()
+            // Initial data processing
+            processData()
+        }
+        // Add this to make sure the chart refreshes when new readings are imported
+        .onChange(of: readings.count) { _ in
+            processData()
+        }
+        // Also listen for changes to the last reading date which might indicate new data
+        .onChange(of: readings.last?.date) { _ in
             processData()
         }
     }
@@ -41,9 +102,22 @@ struct SimpleBPChart: View {
         let calendar = Calendar.current
         let endDate = Date()
         let startDate = calendar.date(byAdding: .day, value: -30, to: endDate)!
-        self.dateRange = startDate...endDate
         
-        // Filter readings to last 30 days
+        // Store the initial date range
+        rangeStartDate = startDate
+        rangeEndDate = endDate
+        dateRange = startDate...endDate
+        
+        // Reset accumulated offset when refreshing
+        dragOffset = 0
+        accumulatedOffset = 0
+        
+        // Process data for this range
+        processDataForRange(startDate: startDate, endDate: endDate)
+    }
+    
+    private func processDataForRange(startDate: Date, endDate: Date) {
+        // Filter readings to the given date range
         let filteredReadings = readings.filter {
             reading in reading.date >= startDate && reading.date <= endDate
         }
@@ -61,6 +135,7 @@ struct SimpleBPChart: View {
         diastolicStdDev = calculateStandardDeviation(values: allDiastolicValues)
         
         // Group by day
+        let calendar = Calendar.current
         var dailyReadings: [Date: [BloodPressureReading]] = [:]
         
         for reading in filteredReadings {
@@ -136,7 +211,6 @@ struct StatsInfoView: View {
                 .font(.caption)
                 .foregroundColor(getBPColor(value: diastolicMean, isSystolic: false))
         }
-        .padding(.horizontal)
     }
 }
 

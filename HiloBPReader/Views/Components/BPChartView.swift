@@ -38,6 +38,18 @@ struct BPChartView: View {
         .background(Color.secondaryBackground)
         .cornerRadius(16)
         .padding(.horizontal)
+        // Add animation for smooth transitions
+        .animation(.easeInOut(duration: 0.2), value: dateRange.lowerBound)
+        .animation(.easeInOut(duration: 0.2), value: dateRange.upperBound)
+        // Make sure users know this is scrollable
+        .overlay(alignment: .trailing) {
+            Image(systemName: "arrow.left.and.right")
+                .foregroundColor(.secondary.opacity(0.7))
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .cornerRadius(12)
+                .padding(8)
+        }
     }
 }
 

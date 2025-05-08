@@ -9,8 +9,8 @@ struct DashboardView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Hero card with latest stats
-                    BPSummaryCard(stats: dataStore.latestStats)
+                    // Hero card with latest stats - now passing all readings for trend analysis
+                    BPSummaryCard(stats: dataStore.latestStats, readings: dataStore.allReadings)
                     
                     // Quick actions
                     HStack(spacing: 15) {

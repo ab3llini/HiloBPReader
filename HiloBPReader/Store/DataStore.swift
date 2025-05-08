@@ -64,7 +64,12 @@ class DataStore: ObservableObject {
     
     /// Create a unique identifier for a reading based on date, time and values
     private func createReadingIdentifier(_ reading: BloodPressureReading) -> String {
-        return "\(reading.date.timeIntervalSince1970)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd-HH:mm"
+        let dateString = dateFormatter.string(from: reading.date)
+        
+        // Include all relevant properties in the identifier
+        return "\(dateString)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
     }
 }
 

@@ -5,17 +5,22 @@ struct ReadingCard: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Time and type indicator
+            // Time and heart rate on top row
             HStack {
                 Text(formattedTime)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                
                 Spacer()
                 
-                if reading.readingType != .normal {
-                    Image(systemName: "star.fill")
+                // Heart rate moved to top right
+                HStack(spacing: 2) {
+                    Image(systemName: "heart.fill")
                         .font(.caption)
-                        .foregroundColor(.yellow.opacity(0.8))
+                        .foregroundColor(.red.opacity(0.8))
+                    Text("\(reading.heartRate)")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
                 }
             }
             
@@ -39,24 +44,21 @@ struct ReadingCard: View {
                     .foregroundColor(.secondary)
             }
             
-            // Heart rate and date in a row
+            // Date and reading type indicator
             HStack {
-                // Heart rate
-                HStack(spacing: 2) {
-                    Image(systemName: "heart.fill")
-                        .font(.caption)
-                        .foregroundColor(.red.opacity(0.8))
-                    Text("\(reading.heartRate)")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-                
-                Spacer()
-                
                 // Date
                 Text(formattedDate)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                // Reading type indicator (if not normal)
+                if reading.readingType != .normal {
+                    Image(systemName: "star.fill")
+                        .font(.caption)
+                        .foregroundColor(.yellow.opacity(0.8))
+                }
             }
         }
         .padding()

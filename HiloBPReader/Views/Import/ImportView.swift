@@ -10,6 +10,7 @@ struct ImportView: View {
     @State private var importStatus: ImportStatus = .idle
     @State private var importedReport: BloodPressureReport?
     @State private var duplicateCount = 0
+    @State private var totalReadingsCount = 0
     
     enum ImportStatus {
         case idle, processing, success, failure
@@ -48,7 +49,6 @@ struct ImportView: View {
                         dismiss()
                     }
                 }
-                // Removed redundant Done button from navigation bar
             }
             .sheet(isPresented: $isShowingDocumentPicker) {
                 PDFPickerView { url in
@@ -109,13 +109,9 @@ struct ImportView: View {
     }
     
     private var actionButtons: some View {
-        // When it's the initial state, show a select button
-        // When it's successful, show a done button
-        // No "select different" or additional sync button needed
-        
         if importStatus == .idle {
             // Initial select button
-            Button {
+            return Button {
                 isShowingDocumentPicker = true
             } label: {
                 HStack {
@@ -130,7 +126,7 @@ struct ImportView: View {
             }
         } else if importStatus == .success {
             // After success, just provide a done button
-            Button {
+            return Button {
                 dataStore.setCurrentReport(importedReport)
                 dismiss()
             } label: {
@@ -146,7 +142,7 @@ struct ImportView: View {
             }
         } else {
             // For failure or processing, allow retrying
-            Button {
+            return Button {
                 isShowingDocumentPicker = true
             } label: {
                 HStack {
@@ -170,7 +166,7 @@ struct ImportView: View {
             HStack(spacing: 10) {
                 // Readings count
                 dataBadge(
-                    value: "\(report.readings.count)",
+                    value: "\(totalReadingsCount)",
                     label: "Readings",
                     color: .blue
                 )
@@ -253,17 +249,24 @@ struct ImportView: View {
             let parser = PDFParserService()
             
             if let report = parser.parseHiloPDF(from: url) {
-                // Check for duplicates against existing data
-                let existingReadingIds = Set(dataStore.allReadings.map {
-                    "\($0.date.timeIntervalSince1970)-\($0.systolic)-\($0.diastolic)"
-                })
+                // Store total readings count from the report
+                totalReadingsCount = report.readings.count
                 
-                let newReadingIds = Set(report.readings.map {
-                    "\($0.date.timeIntervalSince1970)-\($0.systolic)-\($0.diastolic)"
-                })
+                // Fix the duplicate detection logic
+                // Create a more consistent identifier for readings
+                let existingReadingIds = Set(dataStore.allReadings.map { createReadingIdentifier($0) })
+                let newReadingIds = report.readings.map { createReadingIdentifier($0) }
                 
-                // Count duplicates
-                duplicateCount = newReadingIds.intersection(existingReadingIds).count
+                // Use a set to get unique IDs from the new readings
+                let uniqueNewReadingIds = Set(newReadingIds)
+                
+                // Count how many readings already exist in our datastore
+                duplicateCount = 0
+                for readingId in uniqueNewReadingIds {
+                    if existingReadingIds.contains(readingId) {
+                        duplicateCount += 1
+                    }
+                }
                 
                 importedReport = report
                 importStatus = .success
@@ -273,5 +276,12 @@ struct ImportView: View {
         }
     }
     
-    // Removed syncToHealthKit method as we're handling this on the main dashboard
+    // Create a consistent identifier for a reading based on date, time and values
+    private func createReadingIdentifier(_ reading: BloodPressureReading) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd-HH:mm"
+        let dateString = dateFormatter.string(from: reading.date)
+        
+        return "\(dateString)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
+    }
 }
