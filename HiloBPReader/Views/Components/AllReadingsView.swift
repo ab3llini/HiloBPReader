@@ -98,10 +98,7 @@ struct ReadingRowView: View {
                     .font(.headline)
                 
                 if reading.readingType != .normal {
-                    Label(reading.readingType.rawValue.isEmpty ? "Reading" : reading.readingType.rawValue,
-                          systemImage: "star.fill")
-                        .font(.caption)
-                        .foregroundColor(.yellow)
+                    readingTypeLabel
                 }
             }
             
@@ -114,6 +111,27 @@ struct ReadingRowView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private var readingTypeLabel: some View {
+        Group {
+            switch reading.readingType {
+            case .initialization:
+                Label("Initialization", systemImage: "target.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            case .cuffMeasurement:
+                Label("Cuff", systemImage: "rectangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+            case .onDemandPhone:
+                Label("Phone", systemImage: "phone.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            case .normal:
+                EmptyView()
+            }
+        }
     }
     
     private var systolicColor: Color {

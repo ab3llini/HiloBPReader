@@ -17,6 +17,7 @@ struct SimpleBPChart: View {
     @State private var isScrolling = false
     @State private var rangeStartDate: Date = Date().addingTimeInterval(-30 * 24 * 60 * 60)
     @State private var rangeEndDate: Date = Date()
+    @State private var lastDayOffset: Int = 0  // New state to track last offset
     
     // For haptic feedback
     let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -37,35 +38,30 @@ struct SimpleBPChart: View {
                     .onChanged { gesture in
                         let newOffset = gesture.translation.width + accumulatedOffset
                         dragOffset = newOffset
-                        
-                        // Calculate day offset (20 points per day as an example)
+
                         let dayWidth: CGFloat = 20
                         let dayOffset = Int(newOffset / dayWidth)
-                        
-                        // Update date range during drag
+
                         let calendar = Calendar.current
                         let initialStartDate = calendar.date(byAdding: .day, value: -30, to: Date())!
                         let initialEndDate = Date()
-                        
-                        // Move the date range based on the drag
+
                         let newStartDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialStartDate)!
                         let newEndDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialEndDate)!
-                        
-                        // Only update if date has changed and give haptic feedback
-                        if !isScrolling || Int(accumulatedOffset / dayWidth) != Int(newOffset / dayWidth) {
+
+                        // Only trigger haptic when dayOffset actually changes
+                        if dayOffset != lastDayOffset {
                             hapticFeedback.impactOccurred()
-                            isScrolling = true
+                            lastDayOffset = dayOffset
                         }
-                        
+
                         rangeStartDate = newStartDate
                         rangeEndDate = newEndDate
                         dateRange = newStartDate...newEndDate
-                        
-                        // Process data for the new range
+
                         processDataForRange(startDate: newStartDate, endDate: newEndDate)
                     }
                     .onEnded { _ in
-                        // Save the accumulated offset
                         accumulatedOffset = dragOffset
                         isScrolling = false
                     }

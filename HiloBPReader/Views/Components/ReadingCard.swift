@@ -53,12 +53,8 @@ struct ReadingCard: View {
                 
                 Spacer()
                 
-                // Reading type indicator (if not normal)
-                if reading.readingType != .normal {
-                    Image(systemName: "star.fill")
-                        .font(.caption)
-                        .foregroundColor(.yellow.opacity(0.8))
-                }
+                // Reading type indicator with different icons based on type
+                readingTypeIcon
             }
         }
         .padding()
@@ -78,6 +74,25 @@ struct ReadingCard: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
         return formatter.string(from: reading.date)
+    }
+    
+    private var readingTypeIcon: some View {
+        Group {
+            switch reading.readingType {
+            case .initialization:
+                Image(systemName: "target.fill")
+                    .foregroundColor(.orange)
+            case .cuffMeasurement:
+                Image(systemName: "rectangle.fill")
+                    .foregroundColor(.blue)
+            case .onDemandPhone:
+                Image(systemName: "phone.fill")
+                    .foregroundColor(.green)
+            case .normal:
+                EmptyView()
+            }
+        }
+        .font(.caption)
     }
     
     private var systolicColor: Color {

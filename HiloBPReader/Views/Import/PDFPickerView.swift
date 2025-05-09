@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PDFPickerView: UIViewControllerRepresentable {
-    var onPDFPicked: (URL) -> Void
+    var onPDFPicked: (URL, Bool) -> Void
     
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         // Create a document picker for PDF files
@@ -21,9 +21,9 @@ struct PDFPickerView: UIViewControllerRepresentable {
     }
     
     class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPDFPicked: (URL) -> Void
+        let onPDFPicked: (URL, Bool) -> Void
         
-        init(onPDFPicked: @escaping (URL) -> Void) {
+        init(onPDFPicked: @escaping (URL, Bool) -> Void) {
             self.onPDFPicked = onPDFPicked
         }
         
@@ -32,13 +32,10 @@ struct PDFPickerView: UIViewControllerRepresentable {
             
             // Start security-scoped resource access
             let securitySuccess = url.startAccessingSecurityScopedResource()
-            defer {
-                if securitySuccess {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
             
-            onPDFPicked(url)
+            // Pass both the URL and the security success status to the callback
+            // The parent view will be responsible for stopping access when done
+            onPDFPicked(url, securitySuccess)
         }
         
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {

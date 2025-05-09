@@ -12,6 +12,9 @@ struct ImportView: View {
     @State private var duplicateCount = 0
     @State private var totalReadingsCount = 0
     
+    // Added to track security-scoped resource access
+    @State private var securityScopedAccessGranted = false
+    
     enum ImportStatus {
         case idle, processing, success, failure
     }
@@ -51,10 +54,15 @@ struct ImportView: View {
                 }
             }
             .sheet(isPresented: $isShowingDocumentPicker) {
-                PDFPickerView { url in
+                PDFPickerView { url, securitySuccess in
                     pdfURL = url
+                    securityScopedAccessGranted = securitySuccess
                     processImport(url: url)
                 }
+            }
+            .onDisappear {
+                // Make sure we release security-scoped resource access when leaving the view
+                stopSecurityScopedAccess()
             }
         }
     }
@@ -143,6 +151,8 @@ struct ImportView: View {
         } else {
             // For failure or processing, allow retrying
             return Button {
+                // Make sure we stop any existing security-scoped access before trying again
+                stopSecurityScopedAccess()
                 isShowingDocumentPicker = true
             } label: {
                 HStack {
@@ -241,6 +251,14 @@ struct ImportView: View {
         .cornerRadius(8)
     }
     
+    // Function to stop the security-scoped resource access
+    private func stopSecurityScopedAccess() {
+        if securityScopedAccessGranted, let _ = pdfURL {
+            pdfURL?.stopAccessingSecurityScopedResource()
+            securityScopedAccessGranted = false
+        }
+    }
+    
     private func processImport(url: URL) {
         importStatus = .processing
         
@@ -272,6 +290,8 @@ struct ImportView: View {
                 importStatus = .success
             } else {
                 importStatus = .failure
+                // Stop accessing the security-scoped resource if processing failed
+                stopSecurityScopedAccess()
             }
         }
     }
