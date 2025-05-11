@@ -89,47 +89,70 @@ struct BPSummaryCard: View {
             return (.stable, 0)
         }
         
-        // Sort readings by date
+        // First, sort readings by date
         let sortedReadings = readings.sorted(by: { $0.date < $1.date })
         
-        // Split readings into two halves (first 15 days vs last 15 days)
-        let midpoint = max(1, sortedReadings.count / 2)
-        let firstHalf = Array(sortedReadings.prefix(midpoint))
-        let secondHalf = Array(sortedReadings.suffix(sortedReadings.count - midpoint))
+        // We need at least a few readings to detect a trend
+        guard sortedReadings.count >= 3 else {
+            return (.stable, 0)
+        }
+        
+        // Get the dates for appropriate comparison
+        let calendar = Calendar.current
+        let now = Date()
+        let twoWeeksAgo = calendar.date(byAdding: .day, value: -14, to: now)!
+        let fourWeeksAgo = calendar.date(byAdding: .day, value: -28, to: now)!
+        
+        // Filter readings into two meaningful time periods: recent (0-14 days) and previous (14-28 days)
+        let recentReadings = sortedReadings.filter { $0.date >= twoWeeksAgo && $0.date <= now }
+        let previousReadings = sortedReadings.filter { $0.date >= fourWeeksAgo && $0.date < twoWeeksAgo }
+        
+        // If we don't have enough data in either period, return stable
+        if recentReadings.isEmpty || previousReadings.isEmpty {
+            return (.stable, 0)
+        }
         
         // Calculate averages for both periods
-        let firstAvg: Double
-        let secondAvg: Double
+        let recentAvg: Double
+        let previousAvg: Double
         
         switch type {
         case "systolic":
-            firstAvg = firstHalf.map { Double($0.systolic) }.reduce(0, +) / Double(firstHalf.count)
-            secondAvg = secondHalf.map { Double($0.systolic) }.reduce(0, +) / Double(secondHalf.count)
+            recentAvg = recentReadings.map { Double($0.systolic) }.reduce(0, +) / Double(recentReadings.count)
+            previousAvg = previousReadings.map { Double($0.systolic) }.reduce(0, +) / Double(previousReadings.count)
         case "diastolic":
-            firstAvg = firstHalf.map { Double($0.diastolic) }.reduce(0, +) / Double(firstHalf.count)
-            secondAvg = secondHalf.map { Double($0.diastolic) }.reduce(0, +) / Double(secondHalf.count)
+            recentAvg = recentReadings.map { Double($0.diastolic) }.reduce(0, +) / Double(recentReadings.count)
+            previousAvg = previousReadings.map { Double($0.diastolic) }.reduce(0, +) / Double(previousReadings.count)
         case "heartrate":
-            firstAvg = firstHalf.map { Double($0.heartRate) }.reduce(0, +) / Double(firstHalf.count)
-            secondAvg = secondHalf.map { Double($0.heartRate) }.reduce(0, +) / Double(secondHalf.count)
+            recentAvg = recentReadings.map { Double($0.heartRate) }.reduce(0, +) / Double(recentReadings.count)
+            previousAvg = previousReadings.map { Double($0.heartRate) }.reduce(0, +) / Double(previousReadings.count)
         default:
             return (.stable, 0)
         }
         
-        // Calculate percentage change
-        let change = (secondAvg - firstAvg) / firstAvg * 100
+        // Calculate percentage change (with safety check for division by zero)
+        let change = previousAvg != 0 ? ((recentAvg - previousAvg) / previousAvg) * 100 : 0
         
-        // Determine direction
+        // Determine clinical significance - blood pressure changes should be interpreted conservatively
+        // Small changes might be normal variations rather than trends
         let direction: TrendDirection
-        if abs(change) < 2 {
+        
+        // For blood pressure, even small sustained changes can be clinically significant
+        let significanceThreshold = type == "heartrate" ? 5.0 : 3.0
+        
+        if abs(change) < significanceThreshold {
             direction = .stable
         } else if change > 0 {
+            // For BP, increasing is concerning, for heart rate it depends
             direction = .increasing
         } else {
+            // For BP, decreasing is typically positive
             direction = .decreasing
         }
         
         return (direction, abs(change))
     }
+
     
     // Calculate min-max range
     private func calculateRange(for type: String) -> (min: Int, max: Int) {

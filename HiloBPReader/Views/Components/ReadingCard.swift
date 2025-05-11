@@ -3,6 +3,14 @@ import SwiftUI
 struct ReadingCard: View {
     let reading: BloodPressureReading
     
+    // Get the classification from the central service
+    private var classification: BPClassification {
+        BPClassificationService.shared.classify(
+            systolic: reading.systolic,
+            diastolic: reading.diastolic
+        )
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Time and heart rate on top row
@@ -42,6 +50,16 @@ struct ReadingCard: View {
                 Text("DIA")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+            
+            // Add the classification badge - NEW
+            HStack {
+                Circle()
+                    .fill(classification.color)
+                    .frame(width: 8, height: 8)
+                Text(classification.rawValue)
+                    .font(.caption)
+                    .foregroundColor(classification.color)
             }
             
             // Date and reading type indicator
@@ -95,29 +113,13 @@ struct ReadingCard: View {
         .font(.caption)
     }
     
+    // Now using the service
     private var systolicColor: Color {
-        if reading.systolic >= 160 {
-            return .red
-        } else if reading.systolic >= 140 {
-            return .orange
-        } else if reading.systolic >= 130 {
-            return .yellow
-        } else if reading.systolic >= 100 {
-            return .green
-        } else {
-            return .blue // Low BP is blue
-        }
+        BPClassificationService.shared.systolicColor(reading.systolic)
     }
     
+    // Now using the service
     private var diastolicColor: Color {
-        if reading.diastolic >= 100 {
-            return .red
-        } else if reading.diastolic >= 90 {
-            return .orange
-        } else if reading.diastolic >= 85 {
-            return .yellow
-        } else {
-            return .green
-        }
+        BPClassificationService.shared.diastolicColor(reading.diastolic)
     }
 }

@@ -17,16 +17,37 @@ struct SimpleBPChart: View {
     @State private var isScrolling = false
     @State private var rangeStartDate: Date = Date().addingTimeInterval(-30 * 24 * 60 * 60)
     @State private var rangeEndDate: Date = Date()
-    @State private var lastDayOffset: Int = 0  // New state to track last offset
+    @State private var lastDayOffset: Int = 0  // State to track last offset
+    @State private var isViewingHistoricalData: Bool = false // New state to track historical view
     
     // For haptic feedback
     let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text("30 Day Trend")
-                .font(.headline)
-                .padding(.leading)
+            // Title with historical data indicator
+            HStack {
+                Text("30 Day Trend")
+                    .font(.headline)
+                
+                Spacer()
+                
+                // Show historical data badge when applicable
+                if isViewingHistoricalData {
+                    HStack {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundColor(.orange)
+                        Text("Historical Data")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.2))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.horizontal)
             
             // Chart with gesture
             BPChartView(
@@ -48,6 +69,10 @@ struct SimpleBPChart: View {
 
                         let newStartDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialStartDate)!
                         let newEndDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialEndDate)!
+                        
+                        // Check if we're viewing historical data (more than 1 day in the past)
+                        let isHistorical = calendar.date(byAdding: .day, value: -1, to: Date())! > newEndDate
+                        isViewingHistoricalData = isHistorical
 
                         // Only trigger haptic when dayOffset actually changes
                         if dayOffset != lastDayOffset {
@@ -67,12 +92,16 @@ struct SimpleBPChart: View {
                     }
             )
             
-            // Stats info - moved to bottom
+            // Date range display - Fixed version of component
+            dateRangeDisplay
+            
+            // Stats info
             StatsInfoView(
                 systolicMean: systolicMean,
                 systolicStdDev: systolicStdDev,
                 diastolicMean: diastolicMean,
-                diastolicStdDev: diastolicStdDev
+                diastolicStdDev: diastolicStdDev,
+                isHistorical: isViewingHistoricalData
             )
             .padding(.horizontal)
             .padding(.top, 8)
@@ -84,13 +113,70 @@ struct SimpleBPChart: View {
             processData()
         }
         // Add this to make sure the chart refreshes when new readings are imported
-        .onChange(of: readings.count) { _ in
+        // Updated to use the new onChange syntax for iOS 17+
+        .onChange(of: readings.count) { _, _ in
             processData()
         }
         // Also listen for changes to the last reading date which might indicate new data
-        .onChange(of: readings.last?.date) { _ in
+        .onChange(of: readings.last?.date) { _, _ in
             processData()
         }
+    }
+    
+    private var formattedDateRange: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: rangeStartDate) + " to " + formatter.string(from: rangeEndDate)
+    }
+    
+    private var dateRangeDisplay: some View {
+        HStack {
+            Text(formattedDateRange)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Spacer()
+            
+            // Reset button
+            if isViewingHistoricalData {
+                Button(action: {
+                    // Reset to current date
+                    resetToCurrentDate()
+                    // Provide haptic feedback
+                    hapticFeedback.impactOccurred()
+                }) {
+                    Label("Current", systemImage: "arrow.uturn.left")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .tint(.blue)
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    // New function to reset to current date
+    private func resetToCurrentDate() {
+        // Reset the date range to the current date minus 30 days
+        let endDate = Date()
+        let calendar = Calendar.current
+        let startDate = calendar.date(byAdding: .day, value: -30, to: endDate)!
+        
+        // Update state
+        rangeStartDate = startDate
+        rangeEndDate = endDate
+        dateRange = startDate...endDate
+        isViewingHistoricalData = false
+        
+        // Reset offsets
+        dragOffset = 0
+        accumulatedOffset = 0
+        lastDayOffset = 0
+        
+        // Process data for current range
+        processDataForRange(startDate: startDate, endDate: endDate)
     }
     
     private func processData() {
@@ -107,6 +193,9 @@ struct SimpleBPChart: View {
         // Reset accumulated offset when refreshing
         dragOffset = 0
         accumulatedOffset = 0
+        
+        // Reset historical flag
+        isViewingHistoricalData = false
         
         // Process data for this range
         processDataForRange(startDate: startDate, endDate: endDate)
@@ -194,18 +283,44 @@ struct StatsInfoView: View {
     let systolicStdDev: Double
     let diastolicMean: Double
     let diastolicStdDev: Double
+    let isHistorical: Bool
     
     var body: some View {
-        HStack {
-            Text("Systolic: \(Int(systolicMean))±\(Int(systolicStdDev))")
-                .font(.caption)
-                .foregroundColor(getBPColor(value: systolicMean, isSystolic: true))
+        VStack(spacing: 4) {
+            HStack {
+                Text("Systolic: \(Int(systolicMean))±\(Int(systolicStdDev))")
+                    .font(.caption)
+                    .foregroundColor(BPClassificationService.shared.systolicColor(Int(systolicMean)))
+                
+                Spacer()
+                
+                Text("Diastolic: \(Int(diastolicMean))±\(Int(diastolicStdDev))")
+                    .font(.caption)
+                    .foregroundColor(BPClassificationService.shared.diastolicColor(Int(diastolicMean)))
+            }
             
-            Spacer()
-            
-            Text("Diastolic: \(Int(diastolicMean))±\(Int(diastolicStdDev))")
-                .font(.caption)
-                .foregroundColor(getBPColor(value: diastolicMean, isSystolic: false))
+            // Display the classification and appropriate message
+            if systolicMean > 0 && diastolicMean > 0 {
+                let classification = BPClassificationService.shared.classify(
+                    systolic: Int(systolicMean),
+                    diastolic: Int(diastolicMean)
+                )
+                
+                HStack {
+                    Text(classification.rawValue)
+                        .font(.caption)
+                        .foregroundColor(classification.color)
+                    
+                    Spacer()
+                    
+                    // If historical, add a warning
+                    if isHistorical {
+                        Text("(Historical Data)")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
         }
     }
 }
@@ -220,24 +335,9 @@ struct BPDataPoint: Identifiable {
     
     var color: Color {
         if type == "Systolic" {
-            return getBPColor(value: value, isSystolic: true)
+            return BPClassificationService.shared.systolicColor(Int(value))
         } else {
-            return getBPColor(value: value, isSystolic: false)
+            return BPClassificationService.shared.diastolicColor(Int(value))
         }
-    }
-}
-
-// Helper function for BP coloring
-func getBPColor(value: Double, isSystolic: Bool) -> Color {
-    if isSystolic {
-        if value < 120 { return .green }
-        else if value < 130 { return .yellow }
-        else if value < 140 { return .orange }
-        else { return .red }
-    } else {
-        if value < 80 { return .green }
-        else if value < 85 { return .yellow }
-        else if value < 90 { return .orange }
-        else { return .red }
     }
 }

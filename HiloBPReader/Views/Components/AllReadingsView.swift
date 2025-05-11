@@ -3,20 +3,115 @@ import SwiftUI
 struct AllReadingsView: View {
     @EnvironmentObject var dataStore: DataStore
     @State private var searchText = ""
+    @State private var showingAdvancedFilters = false
+    @State private var selectedClassification: BPClassification?
     
     var body: some View {
-        List {
-            ForEach(groupedReadings, id: \.date) { group in
-                Section(header: dateHeader(for: group.date)) {
-                    ForEach(group.readings) { reading in
-                        ReadingRowView(reading: reading)
+        VStack {
+            // Add advanced filters section
+            if showingAdvancedFilters {
+                advancedFiltersView
+                    .transition(.opacity)
+            }
+            
+            List {
+                ForEach(groupedReadings, id: \.date) { group in
+                    Section(header: dateHeader(for: group.date)) {
+                        ForEach(group.readings) { reading in
+                            ReadingRowView(reading: reading)
+                        }
+                    }
+                }
+                
+                if groupedReadings.isEmpty {
+                    Section {
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 16) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("No readings match your search")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                
+                                if !searchText.isEmpty {
+                                    Button("Clear Search") {
+                                        searchText = ""
+                                        selectedClassification = nil
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .padding()
+                            Spacer()
+                        }
+                        .listRowBackground(Color.clear)
+                    }
+                }
+            }
+            .navigationTitle("All Readings")
+            .searchable(text: $searchText, prompt: "Search by date, values, or status")
+            .background(Color.mainBackground.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        withAnimation {
+                            showingAdvancedFilters.toggle()
+                        }
+                    }) {
+                        Label(showingAdvancedFilters ? "Hide Filters" : "Filter",
+                              systemImage: showingAdvancedFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
                 }
             }
         }
-        .navigationTitle("All Readings")
-        .searchable(text: $searchText, prompt: "Search readings")
-        .background(Color.mainBackground.ignoresSafeArea())
+    }
+    
+    private var advancedFiltersView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Filter by Classification")
+                .font(.headline)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button(action: {
+                        selectedClassification = nil
+                    }) {
+                        Text("All")
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(selectedClassification == nil ? Color.blue : Color.secondary.opacity(0.2))
+                            .foregroundColor(selectedClassification == nil ? .white : .primary)
+                            .cornerRadius(16)
+                    }
+                    
+                    ForEach([BPClassification.normal, .elevated, .hypertensionStage1, .hypertensionStage2, .crisis]) { classification in
+                        Button(action: {
+                            selectedClassification = classification
+                        }) {
+                            HStack {
+                                Circle()
+                                    .fill(classification.color)
+                                    .frame(width: 8, height: 8)
+                                Text(classification.rawValue)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(selectedClassification == classification ? classification.color : Color.secondary.opacity(0.2))
+                            .foregroundColor(selectedClassification == classification ? .white : .primary)
+                            .cornerRadius(16)
+                        }
+                    }
+                }
+            }
+            
+            Divider()
+        }
+        .padding()
+        .background(Color.secondaryBackground)
     }
     
     // Group readings by date (day)
@@ -45,18 +140,59 @@ struct AllReadingsView: View {
     }
     
     private var filteredReadings: [BloodPressureReading] {
+        var readings = dataStore.allReadings
+        
+        // First apply classification filter if selected
+        if let classification = selectedClassification {
+            readings = readings.filter { reading in
+                let readingClassification = BPClassificationService.shared.classify(
+                    systolic: reading.systolic,
+                    diastolic: reading.diastolic
+                )
+                return readingClassification == classification
+            }
+        }
+        
+        // Then apply text search if any
         if searchText.isEmpty {
-            return dataStore.allReadings.sorted(by: { $0.date > $1.date })
+            return readings.sorted(by: { $0.date > $1.date })
         } else {
-            return dataStore.allReadings.filter { reading in
+            return readings.filter { reading in
+                // Format date for searching
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateFormat = "MMM d, yyyy"
                 let dateString = dateFormatter.string(from: reading.date)
                 
-                return dateString.localizedCaseInsensitiveContains(searchText) ||
-                       reading.time.localizedCaseInsensitiveContains(searchText) ||
-                       "\(reading.systolic)".contains(searchText) ||
-                       "\(reading.diastolic)".contains(searchText)
+                // Get classification for this reading
+                let classification = BPClassificationService.shared.classify(
+                    systolic: reading.systolic,
+                    diastolic: reading.diastolic
+                )
+                
+                // Create a combined string of all searchable terms
+                let searchableText = [
+                    dateString.lowercased(),
+                    reading.time.lowercased(),
+                    "\(reading.systolic)",
+                    "\(reading.diastolic)",
+                    "\(reading.heartRate)",
+                    classification.rawValue.lowercased(),
+                    reading.readingType.rawValue.lowercased()
+                ].joined(separator: " ")
+                
+                // Check direct matches
+                if searchableText.localizedCaseInsensitiveContains(searchText.lowercased()) {
+                    return true
+                }
+                
+                // Check if search term matches a classification
+                if let matchedClassification = BPClassificationService.shared.matchesClassification(searchTerm: searchText),
+                   matchedClassification == classification {
+                    return true
+                }
+                
+                // Not a match
+                return false
             }
             .sorted(by: { $0.date > $1.date })
         }
@@ -91,6 +227,14 @@ struct ReadingGroup {
 struct ReadingRowView: View {
     let reading: BloodPressureReading
     
+    // Get classification from central service
+    private var classification: BPClassification {
+        BPClassificationService.shared.classify(
+            systolic: reading.systolic,
+            diastolic: reading.diastolic
+        )
+    }
+    
     var body: some View {
         HStack {
             VStack(alignment: .leading) {
@@ -100,14 +244,36 @@ struct ReadingRowView: View {
                 if reading.readingType != .normal {
                     readingTypeLabel
                 }
+                
+                // Add the classification label - NEW
+                HStack {
+                    Circle()
+                        .fill(classification.color)
+                        .frame(width: 8, height: 8)
+                    Text(classification.rawValue)
+                        .font(.caption)
+                        .foregroundColor(classification.color)
+                }
             }
             
             Spacer()
             
             HStack(spacing: 16) {
-                BPValueView(value: reading.systolic, label: "SYS", color: systolicColor)
-                BPValueView(value: reading.diastolic, label: "DIA", color: diastolicColor)
-                BPValueView(value: reading.heartRate, label: "BPM", color: .white)
+                BPValueView(
+                    value: reading.systolic,
+                    label: "SYS",
+                    color: BPClassificationService.shared.systolicColor(reading.systolic)
+                )
+                BPValueView(
+                    value: reading.diastolic,
+                    label: "DIA",
+                    color: BPClassificationService.shared.diastolicColor(reading.diastolic)
+                )
+                BPValueView(
+                    value: reading.heartRate,
+                    label: "BPM",
+                    color: BPClassificationService.shared.heartRateColor(reading.heartRate)
+                )
             }
         }
         .padding(.vertical, 4)
@@ -131,32 +297,6 @@ struct ReadingRowView: View {
             case .normal:
                 EmptyView()
             }
-        }
-    }
-    
-    private var systolicColor: Color {
-        if reading.systolic >= 160 {
-            return .red
-        } else if reading.systolic >= 140 {
-            return .orange
-        } else if reading.systolic >= 130 {
-            return .yellow
-        } else if reading.systolic >= 100 {
-            return .green
-        } else {
-            return .blue // Low BP is blue
-        }
-    }
-    
-    private var diastolicColor: Color {
-        if reading.diastolic >= 100 {
-            return .red
-        } else if reading.diastolic >= 90 {
-            return .orange
-        } else if reading.diastolic >= 85 {
-            return .yellow
-        } else {
-            return .green
         }
     }
 }

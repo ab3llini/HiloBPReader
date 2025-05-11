@@ -15,12 +15,24 @@ class DataStore: ObservableObject {
             return BPStats(systolicMean: 0, diastolicMean: 0, heartRateMean: 0)
         }
         
-        // Calculate means from recent readings (last 24 hours)
-        let calendar = Calendar.current
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: Date())!
+        // Always sort by date first (newest first)
+        let sortedReadings = allReadings.sorted(by: { $0.date > $1.date })
         
-        let recentReadings = allReadings.filter { $0.date >= yesterday }
-        let readingsToUse = recentReadings.isEmpty ? allReadings : recentReadings
+        // Calculate means from the most recent 30 days of data
+        let calendar = Calendar.current
+        let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: Date())!
+        
+        // Filter to get readings from the last 30 days
+        let recentReadings = sortedReadings.filter { $0.date >= thirtyDaysAgo }
+        
+        // If we have readings in the last 30 days, use those
+        // Otherwise, just use the most recent readings (up to 10)
+        let readingsToUse = !recentReadings.isEmpty ? recentReadings : Array(sortedReadings.prefix(10))
+        
+        // Only calculate if we have readings to use
+        guard !readingsToUse.isEmpty else {
+            return BPStats(systolicMean: 0, diastolicMean: 0, heartRateMean: 0)
+        }
         
         let systolicMean = Int(readingsToUse.map { Double($0.systolic) }.reduce(0, +) / Double(readingsToUse.count))
         let diastolicMean = Int(readingsToUse.map { Double($0.diastolic) }.reduce(0, +) / Double(readingsToUse.count))
