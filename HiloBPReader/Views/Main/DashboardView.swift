@@ -41,7 +41,9 @@ struct DashboardView: View {
                         }
                         .disabled(dataStore.currentReport == nil ||
                                   healthKitManager.authorizationStatus == .notAvailable ||
-                                  healthKitManager.authorizationStatus == .denied)
+                                  healthKitManager.authorizationStatus == .denied ||
+                                  (healthKitManager.authorizationStatus != .fullAccess &&
+                                   healthKitManager.authorizationStatus != .partialAccess))
                     }
                     .padding(.horizontal)
                     
@@ -114,8 +116,8 @@ struct DashboardView: View {
         
         // Handle different authorization states
         switch healthKitManager.authorizationStatus {
-        case .authorized:
-            // Already authorized, prepare the sync
+        case .fullAccess, .partialAccess:
+            // Has at least some permissions, prepare the sync
             healthKitManager.prepareSync(report.readings)
             
         case .notDetermined, .unknown:
@@ -137,7 +139,7 @@ struct DashboardView: View {
             // Denied - show settings instructions
             syncErrorAlert = SyncAlert(
                 title: "Health Access Denied",
-                message: "Apple Health access has been denied. To enable, go to Settings > Health > Data Access & Devices > [App Name] and turn on permissions for blood pressure."
+                message: "Apple Health access has been denied. To enable, go to Settings > Privacy & Security > Health > HiloBPReader and turn on permissions for blood pressure."
             )
             
         case .notAvailable:
