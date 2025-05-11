@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var healthKitManager: HealthKitManager
     @EnvironmentObject var dataStore: DataStore
     @State private var showingClearConfirmation = false
+    @State private var showingHealthKitInfo = false
     
     var body: some View {
         NavigationView {
@@ -16,10 +17,28 @@ struct SettingsView: View {
                         healthStatusText
                     }
                     
-                    Button("Request Health Access") {
-                        healthKitManager.requestAuthorization()
+                    if healthKitManager.authorizationStatus != .authorized &&
+                       healthKitManager.authorizationStatus != .notAvailable &&
+                       healthKitManager.authorizationStatus != .denied {
+                        Button(action: {
+                            requestHealthAccess()
+                        }) {
+                            HStack {
+                                if healthKitManager.isRequestingPermission {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle())
+                                    Text("Requesting Access...")
+                                } else {
+                                    Text("Request Health Access")
+                                }
+                            }
+                        }
+                        .disabled(healthKitManager.isRequestingPermission)
                     }
-                    .disabled(healthKitManager.authorizationStatus == .authorized)
+                    
+                    Button("About Apple Health Integration") {
+                        showingHealthKitInfo = true
+                    }
                 }
                 
                 Section(header: Text("Data Management")) {
@@ -62,6 +81,28 @@ struct SettingsView: View {
                         }
                     }
                 }
+                
+//                #if DEBUG
+//                Section(header: Text("Developer Options")) {
+//                    Button(action: {
+//                        healthKitManager.resetSavedPermissions()
+//                        // Force a status check
+//                        $healthKitManager.checkAuthorizationStatus
+//                    }) {
+//                        Text("Reset Health Permissions Cache")
+//                            .foregroundColor(.red)
+//                    }
+//                    
+//                    HStack {
+//                        Text("Cached Status")
+//                        Spacer()
+//                        Text("\(healthKitManager.authorizationStatus.rawValue)")
+//                            .foregroundColor(.secondary)
+//                    }
+//                }
+//                #endif
+
+                
             }
             .listStyle(.insetGrouped)
             .background(Color.mainBackground.ignoresSafeArea())
@@ -74,6 +115,9 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("This will remove all imported readings from the app. This cannot be undone.")
+            }
+            .sheet(isPresented: $showingHealthKitInfo) {
+                HealthKitInfoView(isPresented: $showingHealthKitInfo)
             }
         }
     }
@@ -90,6 +134,178 @@ struct SettingsView: View {
         case .notDetermined:
             Text("Not Determined")
                 .foregroundColor(.orange)
+        case .notAvailable:
+            Text("Not Available")
+                .foregroundColor(.gray)
+        case .unknown:
+            Text("Checking...")
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    private func requestHealthAccess() {
+        // Request authorization
+        healthKitManager.requestAuthorization { success in
+            // Nothing needed here - the UI will update based on the published authorizationStatus
         }
     }
 }
+
+// Info view to explain HealthKit permissions
+struct HealthKitInfoView: View {
+    @Binding var isPresented: Bool
+    @EnvironmentObject var healthKitManager: HealthKitManager
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Header image
+                    HStack {
+                        Spacer()
+                        Image(systemName: "heart.text.square.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.pink)
+                            .padding(.vertical, 20)
+                        Spacer()
+                    }
+                    
+                    // Main content
+                    Group {
+                        Text("Apple Health Integration")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        
+                        Text("This app can sync your blood pressure readings to Apple Health, which allows:")
+                            .padding(.top, 8)
+                        
+                        bulletPoint("Centralized storage of all your health data")
+                        bulletPoint("Sharing with your healthcare providers")
+                        bulletPoint("Visualization alongside other health metrics")
+                        bulletPoint("Integration with other health apps")
+                        
+                        Text("Permission Status")
+                            .font(.headline)
+                            .padding(.top, 16)
+                        
+                        HStack {
+                            Text("Current Status:")
+                            Spacer()
+                            statusBadge
+                        }
+                        .padding()
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(8)
+                        
+                        Text("If permission is denied, you can enable it in your device's Settings app:")
+                            .padding(.top, 8)
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("1. Open the Settings app")
+                            Text("2. Scroll down and tap 'Health'")
+                            Text("3. Tap 'Data Access & Devices'")
+                            Text("4. Find this app and tap it")
+                            Text("5. Enable the permissions for blood pressure")
+                        }
+                        .padding(.leading)
+                    }
+                    
+                    // Request button
+                    if healthKitManager.authorizationStatus != .authorized &&
+                       healthKitManager.authorizationStatus != .notAvailable &&
+                       healthKitManager.authorizationStatus != .denied {
+                        Button(action: {
+                            requestHealthAccess()
+                        }) {
+                            HStack {
+                                if healthKitManager.isRequestingPermission {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle())
+                                        .foregroundColor(.white)
+                                    Text("Requesting Access...")
+                                        .foregroundColor(.white)
+                                } else {
+                                    Text("Request Access Now")
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                        }
+                        .disabled(healthKitManager.isRequestingPermission)
+                        .padding(.top, 20)
+                    }
+                    
+                    Spacer()
+                }
+                .padding()
+            }
+            .navigationBarTitle("Health Integration", displayMode: .inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        isPresented = false
+                    }
+                }
+            }
+        }
+    }
+    
+    private func bulletPoint(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("•")
+                .foregroundColor(.blue)
+            Text(text)
+            Spacer()
+        }
+        .padding(.leading, 8)
+    }
+    
+    private var statusBadge: some View {
+        switch healthKitManager.authorizationStatus {
+        case .authorized:
+            return Text("Granted")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        case .denied:
+            return Text("Denied")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.red)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        case .notDetermined:
+            return Text("Not Determined")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.orange)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        case .notAvailable:
+            return Text("Not Available")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.gray)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        case .unknown:
+            return Text("Checking...")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.secondary)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+        }
+    }
+    
+    private func requestHealthAccess() {
+        healthKitManager.requestAuthorization()
+    }
+}
+
+

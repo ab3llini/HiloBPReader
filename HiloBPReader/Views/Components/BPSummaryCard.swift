@@ -12,9 +12,8 @@ struct BPSummaryCard: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 
-                // Period indication instead of today's date
-                Text("Last 30 Days")
-                    .foregroundColor(.secondary)
+                // Replace "Last 30 Days" with actual date range
+                dateRangeText
             }
             
             HStack(spacing: 20) {
@@ -81,6 +80,18 @@ struct BPSummaryCard: View {
                 .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
         )
         .padding(.horizontal)
+    }
+    
+    private var dateRangeText: some View {
+        let calendar = Calendar.current
+        let endDate = Date()
+        let startDate = calendar.date(byAdding: .day, value: -30, to: endDate)!
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        
+        return Text("\(formatter.string(from: startDate)) → \(formatter.string(from: endDate))")
+            .foregroundColor(.secondary)
     }
     
     // Calculate trend: returns (direction, percentage change)

@@ -269,7 +269,8 @@ struct ImportView: View {
             Text("Import Summary")
                 .font(.headline)
             
-            HStack(spacing: 10) {
+            // Improved layout with more vertical arrangement
+            VStack(spacing: 12) {
                 // Readings count
                 dataBadge(
                     value: "\(totalReadingsCount)",
@@ -277,7 +278,7 @@ struct ImportView: View {
                     color: .blue
                 )
                 
-                // Date range
+                // Date range - simplified format to take less space
                 dataBadge(
                     value: dateRange(for: report),
                     label: "Date Range",
@@ -294,7 +295,7 @@ struct ImportView: View {
                 }
             }
             
-            // NEW - BP Categories breakdown
+            // NEW - BP Categories breakdown with better spacing
             if !report.readings.isEmpty {
                 bpCategoriesBreakdown(report: report)
             }
@@ -324,7 +325,7 @@ struct ImportView: View {
         .cornerRadius(12)
     }
     
-    // NEW - BP Categories breakdown
+    // NEW - BP Categories breakdown with better layout
     private func bpCategoriesBreakdown(report: BloodPressureReport) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("BP Classification Breakdown")
@@ -334,48 +335,32 @@ struct ImportView: View {
             // Count readings by category
             let categoryCounts = countReadingsByCategory(report.readings)
             
-            HStack(spacing: 8) {
+            // More vertical layout for better text fitting
+            VStack(spacing: 8) {
                 ForEach(Array(categoryCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { category in
                     if let count = categoryCounts[category], count > 0 {
-                        VStack(spacing: 4) {
+                        HStack {
+                            Circle()
+                                .fill(category.color)
+                                .frame(width: 10, height: 10)
+                            
+                            Text(category.rawValue)
+                                .font(.caption)
+                            
+                            Spacer()
+                            
                             Text("\(count)")
                                 .font(.headline)
                                 .foregroundColor(category.color)
-                            
-                            Text(category.rawValue)
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
                         .background(category.color.opacity(0.1))
                         .cornerRadius(8)
                     }
                 }
             }
         }
-    }
-    
-    // Helper function to count readings by BP category
-    private func countReadingsByCategory(_ readings: [BloodPressureReading]) -> [BPClassification: Int] {
-        var counts: [BPClassification: Int] = [:]
-        
-        // Initialize counts for all categories
-        for category in [BPClassification.normal, .elevated, .hypertensionStage1, .hypertensionStage2, .crisis] {
-            counts[category] = 0
-        }
-        
-        // Count readings by category
-        for reading in readings {
-            let classification = BPClassificationService.shared.classify(
-                systolic: reading.systolic,
-                diastolic: reading.diastolic
-            )
-            counts[classification, default: 0] += 1
-        }
-        
-        return counts
     }
     
     private func dateRange(for report: BloodPressureReport) -> String {
@@ -387,7 +372,7 @@ struct ImportView: View {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d"
         
-        return "\(dateFormatter.string(from: firstDate)) - \(dateFormatter.string(from: lastDate))"
+        return "\(dateFormatter.string(from: firstDate)) → \(dateFormatter.string(from: lastDate))"
     }
     
     // Helper function for consistent data badges
@@ -545,6 +530,27 @@ struct ImportView: View {
         } else {
             hasCriticalReadings = false
         }
+    }
+    
+    // Helper function to count readings by BP category
+    private func countReadingsByCategory(_ readings: [BloodPressureReading]) -> [BPClassification: Int] {
+        var counts: [BPClassification: Int] = [:]
+        
+        // Initialize counts for all categories
+        for category in [BPClassification.normal, .elevated, .hypertensionStage1, .hypertensionStage2, .crisis] {
+            counts[category] = 0
+        }
+        
+        // Count readings by category
+        for reading in readings {
+            let classification = BPClassificationService.shared.classify(
+                systolic: reading.systolic,
+                diastolic: reading.diastolic
+            )
+            counts[classification, default: 0] += 1
+        }
+        
+        return counts
     }
     
     // Create a consistent identifier for a reading based on date, time and values

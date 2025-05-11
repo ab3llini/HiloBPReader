@@ -4,9 +4,9 @@ import SwiftUI
 enum BPClassification: String, Codable, Identifiable {
     case normal = "Normal"
     case elevated = "Elevated"
-    case hypertensionStage1 = "Hypertension Stage 1"
-    case hypertensionStage2 = "Hypertension Stage 2"
-    case crisis = "Hypertensive Crisis"
+    case hypertensionStage1 = "Stage 1"
+    case hypertensionStage2 = "Stage 2"
+    case crisis = "Crisis"
     
     var id: String { rawValue }
     

@@ -21,7 +21,7 @@ struct ReadingCard: View {
                 
                 Spacer()
                 
-                // Heart rate moved to top right
+                // Heart rate moved to top right with white text
                 HStack(spacing: 2) {
                     Image(systemName: "heart.fill")
                         .font(.caption)
@@ -52,7 +52,7 @@ struct ReadingCard: View {
                     .foregroundColor(.secondary)
             }
             
-            // Add the classification badge - NEW
+            // Add the classification badge
             HStack {
                 Circle()
                     .fill(classification.color)
@@ -62,7 +62,7 @@ struct ReadingCard: View {
                     .foregroundColor(classification.color)
             }
             
-            // Date and reading type indicator
+            // Date only (no initialization date) and reading type indicator
             HStack {
                 // Date
                 Text(formattedDate)
@@ -72,7 +72,10 @@ struct ReadingCard: View {
                 Spacer()
                 
                 // Reading type indicator with different icons based on type
-                readingTypeIcon
+                // Only show for non-initialization readings
+                if reading.readingType != .initialization {
+                    readingTypeIcon
+                }
             }
         }
         .padding()
@@ -98,8 +101,8 @@ struct ReadingCard: View {
         Group {
             switch reading.readingType {
             case .initialization:
-                Image(systemName: "target.fill")
-                    .foregroundColor(.orange)
+                // Don't show initialization
+                EmptyView()
             case .cuffMeasurement:
                 Image(systemName: "rectangle.fill")
                     .foregroundColor(.blue)

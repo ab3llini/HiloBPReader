@@ -19,6 +19,7 @@ struct SimpleBPChart: View {
     @State private var rangeEndDate: Date = Date()
     @State private var lastDayOffset: Int = 0  // State to track last offset
     @State private var isViewingHistoricalData: Bool = false // New state to track historical view
+    @State private var smoothingDisabled = false // Add this to prevent flickering
     
     // For haptic feedback
     let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -54,9 +55,15 @@ struct SimpleBPChart: View {
                 data: processedData,
                 dateRange: dateRange
             )
+            .animation(smoothingDisabled ? .none : .easeInOut(duration: 0.2), value: dateRange)
             .gesture(
                 DragGesture()
                     .onChanged { gesture in
+                        // Disable animation during scrolling to prevent flickering
+                        if !smoothingDisabled {
+                            smoothingDisabled = true
+                        }
+                        
                         let newOffset = gesture.translation.width + accumulatedOffset
                         dragOffset = newOffset
 
@@ -67,8 +74,16 @@ struct SimpleBPChart: View {
                         let initialStartDate = calendar.date(byAdding: .day, value: -30, to: Date())!
                         let initialEndDate = Date()
 
+                        // Calculate new dates based on drag offset
                         let newStartDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialStartDate)!
                         let newEndDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialEndDate)!
+                        
+                        // Prevent scrolling beyond today's date
+                        if newEndDate > Date() {
+                            // Reset to current date view
+                            resetToCurrentDate()
+                            return
+                        }
                         
                         // Check if we're viewing historical data (more than 1 day in the past)
                         let isHistorical = calendar.date(byAdding: .day, value: -1, to: Date())! > newEndDate
@@ -89,6 +104,11 @@ struct SimpleBPChart: View {
                     .onEnded { _ in
                         accumulatedOffset = dragOffset
                         isScrolling = false
+                        
+                        // Re-enable animations after scrolling
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            smoothingDisabled = false
+                        }
                     }
             )
             

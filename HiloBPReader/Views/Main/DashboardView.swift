@@ -5,6 +5,15 @@ struct DashboardView: View {
     @EnvironmentObject var healthKitManager: HealthKitManager
     @State private var isShowingImport = false
     
+    // Helper to track sync errors
+    @State private var syncErrorAlert: SyncAlert? = nil
+    
+    struct SyncAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
+    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -26,11 +35,13 @@ struct DashboardView: View {
                             title: "Sync Health",
                             icon: "heart.circle.fill",
                             backgroundColor: Color.pink.opacity(0.8),
-                            isLoading: healthKitManager.syncStatus == .syncing
+                            isLoading: healthKitManager.syncStatus == .syncing || healthKitManager.syncStatus == .checking
                         ) {
                             syncToHealthKit()
                         }
-                        .disabled(dataStore.currentReport == nil)
+                        .disabled(dataStore.currentReport == nil ||
+                                  healthKitManager.authorizationStatus == .notAvailable ||
+                                  healthKitManager.authorizationStatus == .denied)
                     }
                     .padding(.horizontal)
                     
@@ -77,14 +88,64 @@ struct DashboardView: View {
             }
             .background(Color.mainBackground.ignoresSafeArea())
             .navigationTitle("Blood Pressure")
-            .sheet(isPresented: $isShowingImport) {
-                ImportView()
+        }
+        .sheet(isPresented: $isShowingImport) {
+            ImportView()
+        }
+        .sheet(isPresented: $healthKitManager.showingSyncModal) {
+            if let report = dataStore.currentReport {
+                SyncHealthModal(
+                    readings: report.readings,
+                    isPresented: $healthKitManager.showingSyncModal
+                )
             }
+        }
+        .alert(item: $syncErrorAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
     
     private func syncToHealthKit() {
         guard let report = dataStore.currentReport else { return }
-        healthKitManager.syncReadingsToHealthKit(report.readings)
+        
+        // Handle different authorization states
+        switch healthKitManager.authorizationStatus {
+        case .authorized:
+            // Already authorized, prepare the sync
+            healthKitManager.prepareSync(report.readings)
+            
+        case .notDetermined, .unknown:
+            // Not determined - request permission
+            healthKitManager.requestAuthorization { success in
+                if success {
+                    // If successful, prepare sync
+                    self.healthKitManager.prepareSync(report.readings)
+                } else {
+                    // If failed, show error
+                    self.syncErrorAlert = SyncAlert(
+                        title: "Health Access Required",
+                        message: "Blood pressure data cannot be synced without Apple Health permissions."
+                    )
+                }
+            }
+            
+        case .denied:
+            // Denied - show settings instructions
+            syncErrorAlert = SyncAlert(
+                title: "Health Access Denied",
+                message: "Apple Health access has been denied. To enable, go to Settings > Health > Data Access & Devices > [App Name] and turn on permissions for blood pressure."
+            )
+            
+        case .notAvailable:
+            // Not available
+            syncErrorAlert = SyncAlert(
+                title: "Health Not Available",
+                message: "Apple Health is not available on this device."
+            )
+        }
     }
 }

@@ -241,11 +241,11 @@ struct ReadingRowView: View {
                 Text(reading.time)
                     .font(.headline)
                 
-                if reading.readingType != .normal {
+                if reading.readingType != .normal && reading.readingType != .initialization {
                     readingTypeLabel
                 }
                 
-                // Add the classification label - NEW
+                // Add the classification label
                 HStack {
                     Circle()
                         .fill(classification.color)
@@ -264,15 +264,19 @@ struct ReadingRowView: View {
                     label: "SYS",
                     color: BPClassificationService.shared.systolicColor(reading.systolic)
                 )
+                
                 BPValueView(
                     value: reading.diastolic,
                     label: "DIA",
                     color: BPClassificationService.shared.diastolicColor(reading.diastolic)
                 )
+                
+                // Modified to use white color for heart rate
                 BPValueView(
                     value: reading.heartRate,
                     label: "BPM",
-                    color: BPClassificationService.shared.heartRateColor(reading.heartRate)
+                    color: .white,
+                    bgColor: .white.opacity(0.2)
                 )
             }
         }
@@ -283,9 +287,8 @@ struct ReadingRowView: View {
         Group {
             switch reading.readingType {
             case .initialization:
-                Label("Initialization", systemImage: "target.fill")
-                    .font(.caption)
-                    .foregroundColor(.orange)
+                // Don't show initialization
+                EmptyView()
             case .cuffMeasurement:
                 Label("Cuff", systemImage: "rectangle.fill")
                     .font(.caption)
@@ -305,6 +308,7 @@ struct BPValueView: View {
     let value: Int
     let label: String
     let color: Color
+    var bgColor: Color? = nil
     
     var body: some View {
         VStack(spacing: 2) {
@@ -318,7 +322,7 @@ struct BPValueView: View {
         .frame(width: 44)
         .padding(.vertical, 4)
         .padding(.horizontal, 2)
-        .background(color.opacity(0.1))
+        .background(bgColor ?? color.opacity(0.1))
         .cornerRadius(6)
     }
 }
