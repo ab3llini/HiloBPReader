@@ -4,8 +4,6 @@ struct DashboardView: View {
     @EnvironmentObject var dataStore: DataStore
     @EnvironmentObject var healthKitManager: HealthKitManager
     @State private var isShowingImport = false
-    
-    // Helper to track sync errors
     @State private var syncErrorAlert: SyncAlert? = nil
     
     struct SyncAlert: Identifiable {
@@ -18,7 +16,7 @@ struct DashboardView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Hero card with latest stats - now passing all readings for trend analysis
+                    // Hero card with latest stats
                     BPSummaryCard(stats: dataStore.latestStats, readings: dataStore.allReadings)
                     
                     // Quick actions
@@ -35,15 +33,11 @@ struct DashboardView: View {
                             title: "Sync Health",
                             icon: "heart.circle.fill",
                             backgroundColor: Color.pink.opacity(0.8),
-                            isLoading: healthKitManager.syncStatus == .syncing || healthKitManager.syncStatus == .checking
+                            isLoading: isSyncInProgress
                         ) {
                             syncToHealthKit()
                         }
-                        .disabled(dataStore.currentReport == nil ||
-                                  healthKitManager.authorizationStatus == .notAvailable ||
-                                  healthKitManager.authorizationStatus == .denied ||
-                                  (healthKitManager.authorizationStatus != .fullAccess &&
-                                   healthKitManager.authorizationStatus != .partialAccess))
+                        .disabled(!canSync)
                     }
                     .padding(.horizontal)
                     
@@ -111,43 +105,62 @@ struct DashboardView: View {
         }
     }
     
+    // MARK: - Computed Properties
+    private var isSyncInProgress: Bool {
+        switch healthKitManager.syncState {
+        case .preparing, .syncing: return true
+        default: return false
+        }
+    }
+    
+    private var canSync: Bool {
+        guard let _ = dataStore.currentReport,
+              !dataStore.allReadings.isEmpty else { return false }
+        
+        return healthKitManager.canSync
+    }
+    
+    // MARK: - Methods
     private func syncToHealthKit() {
         guard let report = dataStore.currentReport else { return }
         
-        // Handle different authorization states
-        switch healthKitManager.authorizationStatus {
-        case .fullAccess, .partialAccess:
-            // Has at least some permissions, prepare the sync
-            healthKitManager.prepareSync(report.readings)
+        // Handle different authorization states with the new API
+        switch healthKitManager.authStatus {
+        case .full, .partial:
+            // Has permissions - show sync modal
+            healthKitManager.showingSyncModal = true
             
-        case .notDetermined, .unknown:
-            // Not determined - request permission
-            healthKitManager.requestAuthorization { success in
+        case .checking, .denied, .unavailable:
+            // Need to request permissions first
+            Task {
+                let success = await healthKitManager.requestPermissions()
+                
                 if success {
-                    // If successful, prepare sync
-                    self.healthKitManager.prepareSync(report.readings)
+                    // Permission granted - show sync modal
+                    await MainActor.run {
+                        healthKitManager.showingSyncModal = true
+                    }
                 } else {
-                    // If failed, show error
-                    self.syncErrorAlert = SyncAlert(
-                        title: "Health Access Required",
-                        message: "Blood pressure data cannot be synced without Apple Health permissions."
-                    )
+                    // Permission failed - show error
+                    await MainActor.run {
+                        self.syncErrorAlert = SyncAlert(
+                            title: "Health Access Required",
+                            message: self.getPermissionErrorMessage()
+                        )
+                    }
                 }
             }
-            
+        }
+    }
+    
+    private func getPermissionErrorMessage() -> String {
+        switch healthKitManager.authStatus {
         case .denied:
-            // Denied - show settings instructions
-            syncErrorAlert = SyncAlert(
-                title: "Health Access Denied",
-                message: "Apple Health access has been denied. To enable, go to Settings > Privacy & Security > Health > HiloBPReader and turn on permissions for blood pressure."
-            )
-            
-        case .notAvailable:
-            // Not available
-            syncErrorAlert = SyncAlert(
-                title: "Health Not Available",
-                message: "Apple Health is not available on this device."
-            )
+            return "Apple Health access has been denied. To enable, go to Settings > Privacy & Security > Health > HiloBPReader and turn on permissions for blood pressure."
+        case .unavailable:
+            return "Apple Health is not available on this device."
+        default:
+            return "Blood pressure data cannot be synced without Apple Health permissions."
         }
     }
 }

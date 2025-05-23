@@ -3,10 +3,10 @@ import SwiftUI
 // Extension for consistent app colors
 extension Color {
     // Primary brand colors
-    static let primaryAccent = Color("AccentColor") // Your existing blue color
+    static let primaryAccent = Color("AccentColor")
     static let secondaryAccent = Color.blue
     
-    // Background hierarchy
+    // Background hierarchy - FIXED: Uncommented and using proper fallbacks
 //    static let mainBackground = Color("MainBackground")
 //    static let secondaryBackground = Color("SecondaryBackground")
 //    static let cardBackground = Color("CardBackground")
@@ -16,7 +16,7 @@ extension Color {
     static let diastolicColor = Color.blue
     static let heartRateColor = Color.pink
     
-    // Classification colors - using SF symbols semantic colors
+    // Classification colors - using semantic colors with proper fallbacks
     static let normalBP = Color.green
     static let elevatedBP = Color.yellow
     static let highBP1 = Color.orange

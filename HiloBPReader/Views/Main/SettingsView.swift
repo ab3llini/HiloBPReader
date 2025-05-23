@@ -17,49 +17,29 @@ struct SettingsView: View {
                         healthStatusBadge
                     }
                     
-                    // Detailed permissions
-                    if healthKitManager.authorizationStatus != .notAvailable {
-                        VStack {
-                            permissionRow(
-                                title: "Systolic BP",
-                                isGranted: healthKitManager.hasSystolicPermission,
-                                icon: "waveform.path.ecg"
-                            )
-                            
-                            permissionRow(
-                                title: "Diastolic BP",
-                                isGranted: healthKitManager.hasDiastolicPermission,
-                                icon: "waveform.path.ecg"
-                            )
-                            
-                            permissionRow(
-                                title: "Heart Rate",
-                                isGranted: healthKitManager.hasHeartRatePermission,
-                                icon: "heart.fill"
-                            )
-                        }
+                    // Show info button
+                    Button("About Apple Health Integration") {
+                        showingHealthKitInfo = true
                     }
                     
-                    if healthKitManager.authorizationStatus != .fullAccess &&
-                       healthKitManager.authorizationStatus != .notAvailable {
+                    // Request permissions button (if needed)
+                    if needsPermissionRequest {
                         Button(action: {
-                            requestHealthAccess()
+                            Task {
+                                _ = await healthKitManager.requestPermissions()
+                            }
                         }) {
                             HStack {
-                                if healthKitManager.isRequestingPermission {
+                                Text("Request Health Access")
+                                Spacer()
+                                if healthKitManager.authStatus == .checking {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle())
-                                    Text("Requesting Access...")
-                                } else {
-                                    Text("Request Health Access")
+                                        .scaleEffect(0.8)
                                 }
                             }
                         }
-                        .disabled(healthKitManager.isRequestingPermission)
-                    }
-                    
-                    Button("About Apple Health Integration") {
-                        showingHealthKitInfo = true
+                        .disabled(healthKitManager.authStatus == .checking)
                     }
                 } header: {
                     Text("Apple Health")
@@ -99,6 +79,13 @@ struct SettingsView: View {
                         }
                     }
                     
+                    HStack {
+                        Text("Total Readings")
+                        Spacer()
+                        Text("\(dataStore.allReadings.count)")
+                            .foregroundColor(.secondary)
+                    }
+                    
                     Link(destination: URL(string: "https://hilo.com")!) {
                         HStack {
                             Text("Hilo Website")
@@ -116,8 +103,7 @@ struct SettingsView: View {
             .alert("Clear All Data", isPresented: $showingClearConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Clear", role: .destructive) {
-                    dataStore.allReadings = []
-                    dataStore.currentReport = nil
+                    dataStore.clearAllData()
                 }
             } message: {
                 Text("This will remove all imported readings from the app. This cannot be undone.")
@@ -128,71 +114,54 @@ struct SettingsView: View {
         }
     }
     
-    @ViewBuilder
     private var healthStatusBadge: some View {
-        switch healthKitManager.authorizationStatus {
-        case .fullAccess:
-            Text("Full Access")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.green)
-                .cornerRadius(8)
-        case .partialAccess:
-            Text("Partial Access")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.orange)
-                .cornerRadius(8)
-        case .denied:
-            Text("Denied")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.red)
-                .cornerRadius(8)
-        case .notDetermined:
-            Text("Not Determined")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.secondary)
-                .cornerRadius(8)
-        case .notAvailable:
-            Text("Not Available")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.gray)
-                .cornerRadius(8)
-        case .unknown:
-            Text("Checking...")
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.blue)
-                .cornerRadius(8)
-        }
-    }
-    
-    private func permissionRow(title: String, isGranted: Bool, icon: String) -> some View {
-        HStack {
-            Label(title, systemImage: icon)
-            Spacer()
-            if isGranted {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-            } else {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.red)
+        Group {
+            switch healthKitManager.authStatus {
+            case .full:
+                Text("Full Access")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green)
+                    .cornerRadius(8)
+            case .partial:
+                Text("Partial Access")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .cornerRadius(8)
+            case .denied:
+                Text("Denied")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red)
+                    .cornerRadius(8)
+            case .checking:
+                Text("Checking...")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.blue)
+                    .cornerRadius(8)
+            case .unavailable:
+                Text("Not Available")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.gray)
+                    .cornerRadius(8)
             }
         }
     }
     
-    private func requestHealthAccess() {
-        healthKitManager.requestAuthorization { _ in
-            // The UI will update based on the published properties
+    private var needsPermissionRequest: Bool {
+        switch healthKitManager.authStatus {
+        case .denied, .checking:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -257,15 +226,14 @@ struct HealthKitInfoView: View {
                     }
                     
                     // Request button
-                    if healthKitManager.authorizationStatus != .fullAccess &&
-                       healthKitManager.authorizationStatus != .partialAccess &&
-                       healthKitManager.authorizationStatus != .notAvailable &&
-                       healthKitManager.authorizationStatus != .denied {
+                    if healthKitManager.authStatus == .denied || healthKitManager.authStatus == .checking {
                         Button(action: {
-                            requestHealthAccess()
+                            Task {
+                                _ = await healthKitManager.requestPermissions()
+                            }
                         }) {
                             HStack {
-                                if healthKitManager.isRequestingPermission {
+                                if healthKitManager.authStatus == .checking {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle())
                                         .foregroundColor(.white)
@@ -281,7 +249,7 @@ struct HealthKitInfoView: View {
                             .background(Color.blue)
                             .cornerRadius(10)
                         }
-                        .disabled(healthKitManager.isRequestingPermission)
+                        .disabled(healthKitManager.authStatus == .checking)
                         .padding(.top, 20)
                     }
                     
@@ -311,55 +279,44 @@ struct HealthKitInfoView: View {
     }
     
     private var statusBadge: some View {
-        switch healthKitManager.authorizationStatus {
-        case .fullAccess:
-            return Text("Granted")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        case .partialAccess:
-            return Text("Partial Access")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.yellow)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        case .denied:
-            return Text("Denied")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.red)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        case .notDetermined:
-            return Text("Not Determined")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.orange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        case .notAvailable:
-            return Text("Not Available")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.gray)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        case .unknown:
-            return Text("Checking...")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.secondary)
-                .foregroundColor(.white)
-                .cornerRadius(12)
+        Group {
+            switch healthKitManager.authStatus {
+            case .full:
+                Text("Full Access")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            case .partial:
+                Text("Partial Access")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            case .denied:
+                Text("Denied")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.red)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            case .checking:
+                Text("Checking...")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            case .unavailable:
+                Text("Not Available")
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.gray)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
         }
     }
-    
-    private func requestHealthAccess() {
-        healthKitManager.requestAuthorization()
-    }
 }
-
-

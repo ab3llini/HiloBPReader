@@ -1,6 +1,6 @@
 import Foundation
 
-struct BloodPressureReading: Identifiable, Codable {
+struct BloodPressureReading: Identifiable, Codable, Equatable {
     let id: UUID
     let date: Date
     let time: String
@@ -31,5 +31,15 @@ struct BloodPressureReading: Identifiable, Codable {
         self.diastolic = diastolic
         self.heartRate = heartRate
         self.readingType = readingType
+    }
+    
+    // MARK: - Equatable conformance
+    static func == (lhs: BloodPressureReading, rhs: BloodPressureReading) -> Bool {
+        return lhs.date == rhs.date &&
+               lhs.time == rhs.time &&
+               lhs.systolic == rhs.systolic &&
+               lhs.diastolic == rhs.diastolic &&
+               lhs.heartRate == rhs.heartRate &&
+               lhs.readingType == rhs.readingType
     }
 }

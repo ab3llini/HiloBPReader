@@ -11,10 +11,11 @@ struct HiloBPReaderApp: App {
             MainView()
                 .environmentObject(dataStore)
                 .environmentObject(healthKitManager)
-                .preferredColorScheme(.dark)
                 .accentColor(Color("AccentColor"))
-                .onAppear {
-                    healthKitManager.requestAuthorization()
+                // Remove the forced dark mode - let users choose
+                .task {
+                    // Use the new async method properly
+                    _ = await healthKitManager.requestPermissions()
                 }
         }
     }

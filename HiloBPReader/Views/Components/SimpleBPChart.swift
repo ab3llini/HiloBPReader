@@ -1,363 +1,184 @@
 import SwiftUI
 import Charts
 
-// Main container view
 struct SimpleBPChart: View {
     let readings: [BloodPressureReading]
-    @State private var processedData: [BPDataPoint] = []
+    
+    @State private var chartData: [BPChartPoint] = []
     @State private var dateRange: ClosedRange<Date> = Date()...Date()
-    @State private var systolicMean: Double = 0
-    @State private var systolicStdDev: Double = 0
-    @State private var diastolicMean: Double = 0
-    @State private var diastolicStdDev: Double = 0
+    @State private var scrollOffset: CGFloat = 0
     
-    // New states for scrolling functionality
-    @State private var dragOffset: CGFloat = 0
-    @State private var accumulatedOffset: CGFloat = 0
-    @State private var isScrolling = false
-    @State private var rangeStartDate: Date = Date().addingTimeInterval(-30 * 24 * 60 * 60)
-    @State private var rangeEndDate: Date = Date()
-    @State private var lastDayOffset: Int = 0  // State to track last offset
-    @State private var isViewingHistoricalData: Bool = false // New state to track historical view
-    @State private var smoothingDisabled = false // Add this to prevent flickering
+    private let windowDays = 30
+    private let dayWidth: CGFloat = 12
     
-    // For haptic feedback
-    let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
-
     var body: some View {
-        VStack(alignment: .leading) {
-            // Title with historical data indicator
-            HStack {
-                Text("30 Day Trend")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            chartHeader
+            
+            Chart(chartData) { point in
+                // Systolic points
+                if point.type == .systolic {
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("Systolic", point.value)
+                    )
+                    .foregroundStyle(.red)
+                    .symbolSize(40)
+                }
                 
-                Spacer()
+                // Diastolic points
+                if point.type == .diastolic {
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("Diastolic", point.value)
+                    )
+                    .foregroundStyle(.blue)
+                    .symbolSize(40)
+                }
                 
-                // Show historical data badge when applicable
-                if isViewingHistoricalData {
-                    HStack {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .foregroundColor(.orange)
-                        Text("Historical Data")
-                            .font(.caption)
-                            .foregroundColor(.orange)
+                // Reference lines
+                RuleMark(y: .value("Normal Systolic", 120))
+                    .foregroundStyle(.green.opacity(0.3))
+                    .lineStyle(.init(lineWidth: 1, dash: [5]))
+                
+                RuleMark(y: .value("Normal Diastolic", 80))
+                    .foregroundStyle(.green.opacity(0.3))
+                    .lineStyle(.init(lineWidth: 1, dash: [5]))
+            }
+            .chartYScale(domain: 60...180)
+            .chartXScale(domain: dateRange)
+            .chartYAxis {
+                AxisMarks(values: [60, 80, 120, 140, 160, 180])
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day, count: 7)) { value in
+                    if let date = value.as(Date.self) {
+                        AxisValueLabel {
+                            Text(date, format: .dateTime.month().day())
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.2))
-                    .cornerRadius(8)
                 }
             }
-            .padding(.horizontal)
+            .frame(height: 200)
+            .chartScrollableAxes(.horizontal)
+            .chartXVisibleDomain(length: 30 * 24 * 60 * 60) // 30 days in seconds
+            .padding()
+            .background(Color.secondaryBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
             
-            // Chart with gesture
-            BPChartView(
-                data: processedData,
-                dateRange: dateRange
-            )
-            .animation(smoothingDisabled ? .none : .easeInOut(duration: 0.2), value: dateRange)
-            .gesture(
-                DragGesture()
-                    .onChanged { gesture in
-                        // Disable animation during scrolling to prevent flickering
-                        if !smoothingDisabled {
-                            smoothingDisabled = true
-                        }
-                        
-                        let newOffset = gesture.translation.width + accumulatedOffset
-                        dragOffset = newOffset
-
-                        let dayWidth: CGFloat = 20
-                        let dayOffset = Int(newOffset / dayWidth)
-
-                        let calendar = Calendar.current
-                        let initialStartDate = calendar.date(byAdding: .day, value: -30, to: Date())!
-                        let initialEndDate = Date()
-
-                        // Calculate new dates based on drag offset
-                        let newStartDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialStartDate)!
-                        let newEndDate = calendar.date(byAdding: .day, value: -dayOffset, to: initialEndDate)!
-                        
-                        // Prevent scrolling beyond today's date
-                        if newEndDate > Date() {
-                            // Reset to current date view
-                            resetToCurrentDate()
-                            return
-                        }
-                        
-                        // Check if we're viewing historical data (more than 1 day in the past)
-                        let isHistorical = calendar.date(byAdding: .day, value: -1, to: Date())! > newEndDate
-                        isViewingHistoricalData = isHistorical
-
-                        // Only trigger haptic when dayOffset actually changes
-                        if dayOffset != lastDayOffset {
-                            hapticFeedback.impactOccurred()
-                            lastDayOffset = dayOffset
-                        }
-
-                        rangeStartDate = newStartDate
-                        rangeEndDate = newEndDate
-                        dateRange = newStartDate...newEndDate
-
-                        processDataForRange(startDate: newStartDate, endDate: newEndDate)
-                    }
-                    .onEnded { _ in
-                        accumulatedOffset = dragOffset
-                        isScrolling = false
-                        
-                        // Re-enable animations after scrolling
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            smoothingDisabled = false
-                        }
-                    }
-            )
-            
-            // Date range display - Fixed version of component
-            dateRangeDisplay
-            
-            // Stats info
-            StatsInfoView(
-                systolicMean: systolicMean,
-                systolicStdDev: systolicStdDev,
-                diastolicMean: diastolicMean,
-                diastolicStdDev: diastolicStdDev,
-                isHistorical: isViewingHistoricalData
-            )
-            .padding(.horizontal)
-            .padding(.top, 8)
-        }
-        .onAppear {
-            // Prepare haptic feedback
-            hapticFeedback.prepare()
-            // Initial data processing
-            processData()
-        }
-        // Add this to make sure the chart refreshes when new readings are imported
-        // Updated to use the new onChange syntax for iOS 17+
-        .onChange(of: readings.count) { _, _ in
-            processData()
-        }
-        // Also listen for changes to the last reading date which might indicate new data
-        .onChange(of: readings.last?.date) { _, _ in
-            processData()
-        }
-    }
-    
-    private var formattedDateRange: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: rangeStartDate) + " to " + formatter.string(from: rangeEndDate)
-    }
-    
-    private var dateRangeDisplay: some View {
-        HStack {
-            Text(formattedDateRange)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Spacer()
-            
-            // Reset button
-            if isViewingHistoricalData {
-                Button(action: {
-                    // Reset to current date
-                    resetToCurrentDate()
-                    // Provide haptic feedback
-                    hapticFeedback.impactOccurred()
-                }) {
-                    Label("Current", systemImage: "arrow.uturn.left")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .tint(.blue)
+            // Stats summary
+            if !chartData.isEmpty {
+                statsView
             }
         }
         .padding(.horizontal)
+        .onAppear { updateChartData() }
+        .onChange(of: readings) { _, _ in updateChartData() }
     }
     
-    // New function to reset to current date
-    private func resetToCurrentDate() {
-        // Reset the date range to the current date minus 30 days
-        let endDate = Date()
-        let calendar = Calendar.current
-        let startDate = calendar.date(byAdding: .day, value: -30, to: endDate)!
-        
-        // Update state
-        rangeStartDate = startDate
-        rangeEndDate = endDate
-        dateRange = startDate...endDate
-        isViewingHistoricalData = false
-        
-        // Reset offsets
-        dragOffset = 0
-        accumulatedOffset = 0
-        lastDayOffset = 0
-        
-        // Process data for current range
-        processDataForRange(startDate: startDate, endDate: endDate)
-    }
-    
-    private func processData() {
-        // Set date range to last 30 days
-        let calendar = Calendar.current
-        let endDate = Date()
-        let startDate = calendar.date(byAdding: .day, value: -30, to: endDate)!
-        
-        // Store the initial date range
-        rangeStartDate = startDate
-        rangeEndDate = endDate
-        dateRange = startDate...endDate
-        
-        // Reset accumulated offset when refreshing
-        dragOffset = 0
-        accumulatedOffset = 0
-        
-        // Reset historical flag
-        isViewingHistoricalData = false
-        
-        // Process data for this range
-        processDataForRange(startDate: startDate, endDate: endDate)
-    }
-    
-    private func processDataForRange(startDate: Date, endDate: Date) {
-        // Filter readings to the given date range
-        let filteredReadings = readings.filter {
-            reading in reading.date >= startDate && reading.date <= endDate
+    private var chartHeader: some View {
+        HStack {
+            Text("30 Day Trend")
+                .font(.headline)
+            
+            Spacer()
+            
+            // Legend
+            HStack(spacing: 16) {
+                Label("Systolic", systemImage: "circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                
+                Label("Diastolic", systemImage: "circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
         }
+    }
+    
+    private var statsView: some View {
+        let systolicData = chartData.filter { $0.type == .systolic }
+        let diastolicData = chartData.filter { $0.type == .diastolic }
         
-        // Calculate overall stats
-        let allSystolicValues = filteredReadings.map { Double($0.systolic) }
-        let allDiastolicValues = filteredReadings.map { Double($0.diastolic) }
+        let avgSystolic = systolicData.isEmpty ? 0 : Int(systolicData.map(\.value).reduce(0, +) / Double(systolicData.count))
+        let avgDiastolic = diastolicData.isEmpty ? 0 : Int(diastolicData.map(\.value).reduce(0, +) / Double(diastolicData.count))
         
-        systolicMean = allSystolicValues.isEmpty ? 0 :
-            allSystolicValues.reduce(0, +) / Double(allSystolicValues.count)
-        diastolicMean = allDiastolicValues.isEmpty ? 0 :
-            allDiastolicValues.reduce(0, +) / Double(allDiastolicValues.count)
-        
-        systolicStdDev = calculateStandardDeviation(values: allSystolicValues)
-        diastolicStdDev = calculateStandardDeviation(values: allDiastolicValues)
-        
-        // Group by day
+        return HStack {
+            StatsBadge(title: "Avg Systolic", value: avgSystolic, color: .red)
+            StatsBadge(title: "Avg Diastolic", value: avgDiastolic, color: .blue)
+            StatsBadge(title: "Readings", value: readings.count, color: .secondary)
+        }
+    }
+    
+    private func updateChartData() {
         let calendar = Calendar.current
-        var dailyReadings: [Date: [BloodPressureReading]] = [:]
+        let endDate = Date()
+        let startDate = calendar.date(byAdding: .day, value: -windowDays, to: endDate)!
+        
+        dateRange = startDate...endDate
+        
+        // Filter and group readings by day
+        let filteredReadings = readings.filter { $0.date >= startDate && $0.date <= endDate }
+        
+        var dailyData: [Date: (systolic: [Int], diastolic: [Int])] = [:]
         
         for reading in filteredReadings {
             let day = calendar.startOfDay(for: reading.date)
-            if dailyReadings[day] == nil {
-                dailyReadings[day] = [reading]
-            } else {
-                dailyReadings[day]?.append(reading)
+            if dailyData[day] == nil {
+                dailyData[day] = (systolic: [], diastolic: [])
+            }
+            dailyData[day]?.systolic.append(reading.systolic)
+            dailyData[day]?.diastolic.append(reading.diastolic)
+        }
+        
+        // Convert to chart points
+        var points: [BPChartPoint] = []
+        
+        for (date, values) in dailyData {
+            if !values.systolic.isEmpty {
+                let avgSystolic = Double(values.systolic.reduce(0, +)) / Double(values.systolic.count)
+                points.append(BPChartPoint(date: date, value: avgSystolic, type: .systolic))
+            }
+            
+            if !values.diastolic.isEmpty {
+                let avgDiastolic = Double(values.diastolic.reduce(0, +)) / Double(values.diastolic.count)
+                points.append(BPChartPoint(date: date, value: avgDiastolic, type: .diastolic))
             }
         }
         
-        // Create data points
-        var data: [BPDataPoint] = []
-        
-        for (date, dayReadings) in dailyReadings {
-            // Systolic stats
-            let systolicValues = dayReadings.map { Double($0.systolic) }
-            let systolicMean = systolicValues.reduce(0, +) / Double(systolicValues.count)
-            let systolicStdDev = calculateStandardDeviation(values: systolicValues)
-            
-            // Diastolic stats
-            let diastolicValues = dayReadings.map { Double($0.diastolic) }
-            let diastolicMean = diastolicValues.reduce(0, +) / Double(diastolicValues.count)
-            let diastolicStdDev = calculateStandardDeviation(values: diastolicValues)
-            
-            data.append(BPDataPoint(
-                id: UUID().uuidString + "-sys",
-                date: date,
-                value: systolicMean,
-                type: "Systolic",
-                stdDev: systolicStdDev
-            ))
-            
-            data.append(BPDataPoint(
-                id: UUID().uuidString + "-dia",
-                date: date,
-                value: diastolicMean,
-                type: "Diastolic",
-                stdDev: diastolicStdDev
-            ))
-        }
-        
-        // Sort by date
-        self.processedData = data.sorted(by: { $0.date < $1.date })
-    }
-    
-    private func calculateStandardDeviation(values: [Double]) -> Double {
-        let count = Double(values.count)
-        guard count > 1 else { return 0 }
-        
-        let mean = values.reduce(0, +) / count
-        let variance = values.reduce(0) { $0 + pow($1 - mean, 2) } / (count - 1)
-        return sqrt(variance)
+        chartData = points.sorted { $0.date < $1.date }
     }
 }
 
-// Stats display component
-struct StatsInfoView: View {
-    let systolicMean: Double
-    let systolicStdDev: Double
-    let diastolicMean: Double
-    let diastolicStdDev: Double
-    let isHistorical: Bool
+struct BPChartPoint: Identifiable {
+    let id = UUID()
+    let date: Date
+    let value: Double
+    let type: BPType
+    
+    enum BPType {
+        case systolic, diastolic
+    }
+}
+
+struct StatsBadge: View {
+    let title: String
+    let value: Int
+    let color: Color
     
     var body: some View {
         VStack(spacing: 4) {
-            HStack {
-                Text("Systolic: \(Int(systolicMean))±\(Int(systolicStdDev))")
-                    .font(.caption)
-                    .foregroundColor(BPClassificationService.shared.systolicColor(Int(systolicMean)))
-                
-                Spacer()
-                
-                Text("Diastolic: \(Int(diastolicMean))±\(Int(diastolicStdDev))")
-                    .font(.caption)
-                    .foregroundColor(BPClassificationService.shared.diastolicColor(Int(diastolicMean)))
-            }
+            Text("\(value)")
+                .font(.headline)
+                .foregroundStyle(color)
             
-            // Display the classification and appropriate message
-            if systolicMean > 0 && diastolicMean > 0 {
-                let classification = BPClassificationService.shared.classify(
-                    systolic: Int(systolicMean),
-                    diastolic: Int(diastolicMean)
-                )
-                
-                HStack {
-                    Text(classification.rawValue)
-                        .font(.caption)
-                        .foregroundColor(classification.color)
-                    
-                    Spacer()
-                    
-                    // If historical, add a warning
-                    if isHistorical {
-                        Text("(Historical Data)")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                    }
-                }
-            }
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-    }
-}
-
-// Simple data structure
-struct BPDataPoint: Identifiable {
-    let id: String
-    let date: Date
-    let value: Double
-    let type: String
-    let stdDev: Double
-    
-    var color: Color {
-        if type == "Systolic" {
-            return BPClassificationService.shared.systolicColor(Int(value))
-        } else {
-            return BPClassificationService.shared.diastolicColor(Int(value))
-        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(color.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

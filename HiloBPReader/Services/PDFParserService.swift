@@ -39,8 +39,8 @@ class PDFParserService {
         
         // Create the final report
         var report = reportInfo
-        report.readings = allReadings
-        logger.info("Successfully parsed report with \(allReadings.count) total readings")
+        report.readings = removeDuplicateReadings(allReadings)
+        logger.info("Successfully parsed report with \(report.readings.count) total readings")
         
         return report
     }
@@ -148,8 +148,8 @@ class PDFParserService {
     private func extractReadingsFromColumnText(_ text: String) -> [BloodPressureReading] {
         var readings: [BloodPressureReading] = []
         
-        // Look for lines matching our expected format for BP readings
-        let pattern = "(\\d{1,2})\\s+(\\w+),\\s+(\\d{2})\\s+(\\d{1,2}:\\d{2})\\s+(\\d{1,3})\\s+(\\d{1,2})\\s+(\\d{1,2})"
+        // Look for lines matching our expected format for BP readings - more flexible spacing
+        let pattern = "(\\d{1,2})\\s+(\\w+),\\s+(\\d{2})\\s+(\\d{1,2}:\\d{2})\\s+(\\d{1,3})\\s+(\\d{1,3})\\s+(\\d{1,3})"
         
         do {
             let regex = try NSRegularExpression(pattern: pattern, options: [])
@@ -212,6 +212,31 @@ class PDFParserService {
     
     // MARK: - Helper Methods
     
+    /// Remove duplicate readings based on a simple comparison
+    private func removeDuplicateReadings(_ readings: [BloodPressureReading]) -> [BloodPressureReading] {
+        var uniqueReadings: [BloodPressureReading] = []
+        var seenIdentifiers: Set<String> = []
+        
+        for reading in readings {
+            let identifier = createReadingIdentifier(reading)
+            if !seenIdentifiers.contains(identifier) {
+                seenIdentifiers.insert(identifier)
+                uniqueReadings.append(reading)
+            }
+        }
+        
+        return uniqueReadings
+    }
+    
+    /// Create a unique identifier for a reading
+    private func createReadingIdentifier(_ reading: BloodPressureReading) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd-HH:mm"
+        let dateString = dateFormatter.string(from: reading.date)
+        
+        return "\(dateString)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
+    }
+    
     /// Create a Date object from day, month, year strings
     private func createDate(day: String, month: String, year: String) -> Date? {
         let dateFormatter = DateFormatter()
@@ -227,199 +252,35 @@ class PDFParserService {
     /// Determine reading type based on icons/markers near the reading
     private func determineReadingType(_ text: String, at position: Int, hrEnd: Int) -> BloodPressureReading.ReadingType {
         // Look at the specific area right after the heart rate value
-        // This is where the icon indicator should be in the PDF
         let iconSearchStart = hrEnd
-        let iconSearchEnd = min(text.count, iconSearchStart + 20) // Look just a bit ahead for the icon
+        let iconSearchEnd = min(text.count, iconSearchStart + 20)
+        
+        guard iconSearchStart < iconSearchEnd else { return .normal }
         
         let searchRange = NSRange(location: iconSearchStart, length: iconSearchEnd - iconSearchStart)
         let nearIconText = (text as NSString).substring(with: searchRange)
         
-        // Logging for debugging purposes
-        logger.debug("Checking for icons in range: '\(nearIconText)'")
-        
-        // First check for specific icon characters that may be present in the PDF text
-        // These could be Unicode characters representing the icons
-        
-        // Check for initialization icon
-        if nearIconText.contains("⊕") ||
-           nearIconText.contains("◎") ||
-           nearIconText.contains("○") ||
-           nearIconText.contains("⦿") ||
-           nearIconText.contains("Initialization with cuff") {
-            logger.debug("Found initialization icon")
+        // Check for specific icon characters
+        if nearIconText.contains("⊕") || nearIconText.contains("◎") || nearIconText.contains("○") || nearIconText.contains("⦿") {
             return .initialization
         }
         
-        // Check for cuff measurement icon
-        if nearIconText.contains("□") ||
-           nearIconText.contains("▢") ||
-           nearIconText.contains("⬚") ||
-           nearIconText.contains("⬜") ||
-           nearIconText.contains("Cuff measurement") {
-            logger.debug("Found cuff measurement icon")
+        if nearIconText.contains("□") || nearIconText.contains("▢") || nearIconText.contains("⬚") || nearIconText.contains("⬜") {
             return .cuffMeasurement
         }
         
-        // Check for phone measurement icon
-        if nearIconText.contains("📱") ||
-           nearIconText.contains("⚲") ||
-           nearIconText.contains("phone") ||
-           nearIconText.contains("On demand phone measurement") {
-            logger.debug("Found phone measurement icon")
+        if nearIconText.contains("📱") || nearIconText.contains("⚲") || nearIconText.contains("phone") {
             return .onDemandPhone
         }
         
-        // If we didn't find an icon after the HR, search a wider range for reading type descriptions
-        let widerSearchStart = max(0, position - 100)
-        let widerSearchEnd = min(text.count, hrEnd + 100)
-        let widerRange = NSRange(location: widerSearchStart, length: widerSearchEnd - widerSearchStart)
-        let widerSearchText = (text as NSString).substring(with: widerRange)
-        
-        // Check the wider context for descriptive text
-        if widerSearchText.contains("Initialization with cuff") {
-            logger.debug("Found initialization text in wider context")
-            return .initialization
-        } else if widerSearchText.contains("Cuff measurement") {
-            logger.debug("Found cuff measurement text in wider context")
-            return .cuffMeasurement
-        } else if widerSearchText.contains("On demand phone measurement") {
-            logger.debug("Found phone measurement text in wider context")
-            return .onDemandPhone
-        }
-        
-        // Fallback: Look for any non-alphanumeric characters that might be icons
-        do {
-            let iconPattern = try NSRegularExpression(pattern: "[^a-zA-Z0-9\\s]", options: [])
-            let matches = iconPattern.matches(in: nearIconText, options: [], range: NSRange(location: 0, length: nearIconText.count))
-            
-            if !matches.isEmpty {
-                // Found a potential icon character - trying to determine which type it is
-                let iconCharRange = matches[0].range
-                let iconChar = (nearIconText as NSString).substring(with: iconCharRange)
-                
-                logger.debug("Found potential icon character: '\(iconChar)'")
-                
-                // Make a best guess based on the character and its position
-                if iconChar.count == 1 {
-                    // Simple heuristic:
-                    // Round-like characters might be the initialization icon
-                    // Square-like characters might be the cuff measurement icon
-                    if "○◎⊕⦿".contains(iconChar) {
-                        return .initialization
-                    } else if "□▢⬚⬜".contains(iconChar) {
-                        return .cuffMeasurement
-                    }
-                }
-            }
-        } catch {
-            logger.error("Icon regex error: \(error.localizedDescription)")
-        }
-        
-        // Fallback to checking the icon legend at the bottom of the page
-        if let legendRange = text.range(of: "Initialization with cuff.*Cuff measurement.*On demand phone measurement", options: [.regularExpression, .caseInsensitive]) {
-            let legendText = String(text[legendRange])
-            
-            // Look for matches in the full text that might have the same pattern as the legend entries
-            if let iconPositions = findIconPositions(in: legendText) {
-                // Now we know what the icons look like, search for the same patterns near our reading
-                let targetIconPosition = findNearestIcon(to: hrEnd, in: text, iconPatterns: iconPositions)
-                
-                if let iconType = targetIconPosition?.type {
-                    logger.debug("Found icon from legend matching")
-                    return iconType
-                }
-            }
-        }
-        
-        logger.debug("No icon found, assuming normal reading")
         return .normal
-    }
-    
-    // Helper function to analyze the icon legend and extract icon patterns
-    private func findIconPositions(in legendText: String) -> [(pattern: String, type: BloodPressureReading.ReadingType)]? {
-        var iconPatterns: [(pattern: String, type: BloodPressureReading.ReadingType)] = []
-        
-        // Try to find the icon pattern for each reading type in the legend
-        if let initRange = legendText.range(of: "Initialization with cuff", options: .caseInsensitive) {
-            // Look for special characters before "Initialization" text
-            let prefixEndIndex = initRange.lowerBound
-            let prefixStartIndex = legendText.index(prefixEndIndex, offsetBy: -5, limitedBy: legendText.startIndex) ?? legendText.startIndex
-            let prefix = String(legendText[prefixStartIndex..<prefixEndIndex])
-            
-            // Extract non-alphanumeric characters that might be the icon
-            if let iconChar = prefix.first(where: { !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) {
-                iconPatterns.append((String(iconChar), .initialization))
-            }
-        }
-        
-        if let cuffRange = legendText.range(of: "Cuff measurement", options: .caseInsensitive) {
-            // Look for special characters before "Cuff measurement" text
-            let prefixEndIndex = cuffRange.lowerBound
-            let prefixStartIndex = legendText.index(prefixEndIndex, offsetBy: -5, limitedBy: legendText.startIndex) ?? legendText.startIndex
-            let prefix = String(legendText[prefixStartIndex..<prefixEndIndex])
-            
-            // Extract non-alphanumeric characters that might be the icon
-            if let iconChar = prefix.first(where: { !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) {
-                iconPatterns.append((String(iconChar), .cuffMeasurement))
-            }
-        }
-        
-        if let phoneRange = legendText.range(of: "On demand phone measurement", options: .caseInsensitive) {
-            // Look for special characters before "On demand phone" text
-            let prefixEndIndex = phoneRange.lowerBound
-            let prefixStartIndex = legendText.index(prefixEndIndex, offsetBy: -5, limitedBy: legendText.startIndex) ?? legendText.startIndex
-            let prefix = String(legendText[prefixStartIndex..<prefixEndIndex])
-            
-            // Extract non-alphanumeric characters that might be the icon
-            if let iconChar = prefix.first(where: { !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) {
-                iconPatterns.append((String(iconChar), .onDemandPhone))
-            }
-        }
-        
-        return iconPatterns.isEmpty ? nil : iconPatterns
-    }
-    
-    // Find the nearest icon to a position using patterns from the legend
-    private struct IconPosition {
-        let position: Int
-        let type: BloodPressureReading.ReadingType
-    }
-    
-    private func findNearestIcon(to position: Int, in text: String,
-                                 iconPatterns: [(pattern: String, type: BloodPressureReading.ReadingType)]) -> IconPosition? {
-        // Define search range: from position to position + 20 characters
-        let searchStartPosition = position
-        let searchEndPosition = min(text.count, position + 20)
-        
-        guard searchStartPosition < searchEndPosition else { return nil }
-        
-        let searchRange = NSRange(location: searchStartPosition, length: searchEndPosition - searchStartPosition)
-        let searchText = (text as NSString).substring(with: searchRange)
-        
-        // Try to find each icon pattern in this range
-        for (pattern, type) in iconPatterns {
-            if let range = searchText.range(of: pattern) {
-                let iconPosition = searchStartPosition + searchText.distance(from: searchText.startIndex, to: range.lowerBound)
-                return IconPosition(position: iconPosition, type: type)
-            }
-        }
-        
-        return nil
     }
     
     /// Extract the member name from first page
     private func extractMemberName(from text: String) -> String {
-        let patterns = [
-            "Monthly Report\\s+([^\\n]+)",
-            "Alberto Bellini"  // Fallback for specific name from the sample PDF
-        ]
-        
-        for pattern in patterns {
-            if let name = extractUsingRegex(text, pattern: pattern) {
-                return name.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+        if let name = extractUsingRegex(text, pattern: "Monthly Report\\s+([^\\n]+)") {
+            return name.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        
         return "Unknown User"
     }
     
@@ -479,7 +340,6 @@ class PDFParserService {
             return nil
         }
         
-        // This is a more targeted approach to extract specific values
         let daytimeSys = extractIntFromSummaryTable(text, label: "Daytime", column: "Sys", defaultValue: 0)
         let daytimeDia = extractIntFromSummaryTable(text, label: "Daytime", column: "Dia", defaultValue: 0)
         let daytimeHR = extractIntFromSummaryTable(text, label: "Daytime", column: "HR", defaultValue: 0)
@@ -507,12 +367,9 @@ class PDFParserService {
     
     /// Extract a specific integer value from the summary table
     private func extractIntFromSummaryTable(_ text: String, label: String, column: String, defaultValue: Int) -> Int {
-        // First find the table section
         guard let tableRange = text.range(of: "Summary table") else { return defaultValue }
         let tableText = String(text[tableRange.upperBound...])
         
-        // Use a more specific pattern to find the value in the right row and column
-        // This is a simplified approach - in production you might need a more sophisticated table parser
         let rowPattern = "\(label).*?Mean\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)"
         
         guard let regex = try? NSRegularExpression(pattern: rowPattern, options: [.dotMatchesLineSeparators]) else {
@@ -524,7 +381,6 @@ class PDFParserService {
             return defaultValue
         }
         
-        // Determine which capture group to use based on column
         var groupIndex: Int
         switch column {
         case "Sys": groupIndex = 1
@@ -552,12 +408,10 @@ class PDFParserService {
                 return nil
             }
             
-            // If the pattern has a capture group, extract it
             if match.numberOfRanges > 1, let captureRange = Range(match.range(at: 1), in: text) {
                 return String(text[captureRange])
             }
             
-            // Otherwise return the entire matched string
             if let matchedRange = Range(match.range, in: text) {
                 return String(text[matchedRange])
             }

@@ -2,461 +2,302 @@ import Foundation
 import HealthKit
 import SwiftUI
 
+@MainActor
 class HealthKitManager: ObservableObject {
     
-    // HealthKit store
-    private var healthStore: HKHealthStore?
+    // MARK: - Core Properties
+    private let healthStore = HKHealthStore()
     
-    // Individual quantity types
-    private var bloodPressureSystolicType: HKQuantityType?
-    private var bloodPressureDiastolicType: HKQuantityType?
-    private var heartRateType: HKQuantityType?
+    // Quantity types (lazily initialized)
+    private lazy var bpTypes: BPQuantityTypes = {
+        BPQuantityTypes(
+            systolic: HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
+            diastolic: HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
+            heartRate: HKQuantityType.quantityType(forIdentifier: .heartRate)
+        )
+    }()
     
-    // Published properties for UI updates
-    @Published var authorizationStatus: AuthorizationStatus = .unknown
-    @Published var syncStatus: SyncStatus = .idle
-    @Published var existingReadingsCount: Int = 0
-    @Published var readingsToSyncCount: Int = 0
-    @Published var duplicateReadingsCount: Int = 0
-    @Published var showingSyncModal: Bool = false
-    @Published var isRequestingPermission: Bool = false
+    // MARK: - Published State (simplified)
+    @Published var authStatus: AuthStatus = .checking
+    @Published var syncState: SyncState = .idle
+    @Published var showingSyncModal = false
     
-    // Track individual permissions
-    @Published var hasSystolicPermission: Bool = false
-    @Published var hasDiastolicPermission: Bool = false
-    @Published var hasHeartRatePermission: Bool = false
-    
-    enum AuthorizationStatus: String, Equatable {
-        case unknown = "unknown"             // We don't know yet
-        case notAvailable = "notAvailable"   // HealthKit not available on device
-        case notDetermined = "notDetermined" // Permission not yet requested
-        case partialAccess = "partialAccess" // Some permissions granted
-        case fullAccess = "fullAccess"       // All permissions granted
-        case denied = "denied"               // All permissions denied
+    // MARK: - Computed Properties
+    var canSync: Bool {
+        authStatus.hasAnyBPPermission && HKHealthStore.isHealthDataAvailable()
     }
     
-    enum SyncStatus: Equatable {
-        case idle
+    // MARK: - Types
+    enum AuthStatus: Equatable {
         case checking
-        case syncing
-        case completed(Int)
-        case failed(String)
+        case unavailable
+        case denied
+        case partial(permissions: Set<BPPermission>)
+        case full
         
-        static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
-            switch (lhs, rhs) {
-            case (.idle, .idle):
-                return true
-            case (.checking, .checking):
-                return true
-            case (.syncing, .syncing):
-                return true
-            case (.completed(let count1), .completed(let count2)):
-                return count1 == count2
-            case (.failed(_), .failed(_)):
-                return true
-            default:
-                return false
+        var hasAnyBPPermission: Bool {
+            switch self {
+            case .partial(let perms): return !perms.intersection([.systolic, .diastolic]).isEmpty
+            case .full: return true
+            default: return false
+            }
+        }
+    }
+    
+    enum SyncState {
+        case idle
+        case preparing
+        case syncing(progress: Double)
+        case completed(count: Int)
+        case failed(error: HealthKitError)
+    }
+    
+    enum BPPermission: CaseIterable, Equatable {
+        case systolic, diastolic, heartRate
+    }
+    
+    enum HealthKitError: LocalizedError {
+        case notAvailable
+        case permissionDenied
+        case syncFailed(underlying: Error)
+        
+        var errorDescription: String? {
+            switch self {
+            case .notAvailable: return "HealthKit is not available on this device"
+            case .permissionDenied: return "Health permissions are required"
+            case .syncFailed(let error): return "Sync failed: \(error.localizedDescription)"
             }
         }
     }
     
     init() {
-        print("HealthKitManager: Initializing...")
+        Task { await checkInitialPermissions() }
+    }
+    
+    // MARK: - Permission Management
+    func requestPermissions() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            authStatus = .unavailable
+            return false
+        }
         
-        // Check if HealthKit is available
-        if !HKHealthStore.isHealthDataAvailable() {
-            print("HealthKit not available on this device")
-            authorizationStatus = .notAvailable
+        let typesToRequest = bpTypes.allValidTypes
+        guard !typesToRequest.isEmpty else { return false }
+        
+        do {
+            try await healthStore.requestAuthorization(
+                toShare: Set(typesToRequest),
+                read: Set(typesToRequest)
+            )
+            
+            await checkInitialPermissions()
+            return authStatus.hasAnyBPPermission
+            
+        } catch {
+            authStatus = .denied
+            return false
+        }
+    }
+    
+    private func checkInitialPermissions() async {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            authStatus = .unavailable
             return
         }
         
-        // Initialize the store
-        healthStore = HKHealthStore()
+        let permissions = await bpTypes.checkPermissions(healthStore: healthStore)
         
-        // Initialize types - ONLY the basic types, not correlation
-        initializeHealthKitTypes()
-        
-        // Check permission status
-        checkPermissionStatus()
+        authStatus = switch permissions.count {
+        case 0: .denied
+        case BPPermission.allCases.count: .full
+        default: .partial(permissions: permissions)
+        }
     }
     
-    private func initializeHealthKitTypes() {
-        // Initialize ONLY the individual quantity types
-        bloodPressureSystolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic)
-        bloodPressureDiastolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic)
-        heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)
-    }
-    
-    // Check permissions for individual types
-    func checkPermissionStatus() {
-        guard let healthStore = healthStore else {
-            authorizationStatus = .notAvailable
+    // MARK: - Sync Operations
+    func prepareSync(readings: [BloodPressureReading]) async {
+        guard canSync else {
+            syncState = .failed(error: .permissionDenied)
             return
         }
         
-        // Check each type individually
-        if let systolicType = bloodPressureSystolicType {
-            hasSystolicPermission = healthStore.authorizationStatus(for: systolicType) == .sharingAuthorized
-        }
+        syncState = .preparing
         
-        if let diastolicType = bloodPressureDiastolicType {
-            hasDiastolicPermission = healthStore.authorizationStatus(for: diastolicType) == .sharingAuthorized
-        }
+        // Check for duplicates efficiently
+        let duplicateCount = await countDuplicates(readings: readings)
+        let uniqueReadings = readings.count - duplicateCount
         
-        if let heartRateType = heartRateType {
-            hasHeartRatePermission = healthStore.authorizationStatus(for: heartRateType) == .sharingAuthorized
-        }
-        
-        // Update overall status
-        updateAuthorizationStatus()
-    }
-    
-    private func updateAuthorizationStatus() {
-        // Check if types are available
-        if bloodPressureSystolicType == nil ||
-           bloodPressureDiastolicType == nil {
-            authorizationStatus = .notAvailable
-            return
-        }
-        
-        let basicPermissions = [hasSystolicPermission, hasDiastolicPermission]
-        
-        if !basicPermissions.contains(true) {
-            // No permissions granted - check if they've been determined
-            if let systolicType = bloodPressureSystolicType,
-               healthStore?.authorizationStatus(for: systolicType) == .notDetermined {
-                authorizationStatus = .notDetermined
-            } else {
-                authorizationStatus = .denied
-            }
-        } else if basicPermissions.allSatisfy({ $0 }) {
-            // All BP permissions granted
-            authorizationStatus = .fullAccess
+        // Show modal if we have readings to sync
+        if uniqueReadings > 0 {
+            showingSyncModal = true
         } else {
-            // Some but not all permissions granted
-            authorizationStatus = .partialAccess
-        }
-        
-        print("HealthKitManager: Updated authorization status to \(authorizationStatus)")
-    }
-    
-    // Request authorization - ONLY for individual types, never correlation
-    func requestAuthorization(completion: ((Bool) -> Void)? = nil) {
-        guard let healthStore = healthStore else {
-            completion?(false)
-            return
-        }
-        
-        isRequestingPermission = true
-        
-        // Initialize sets for read/write permissions
-        var typesToShare: Set<HKSampleType> = []
-        var typesToRead: Set<HKObjectType> = []
-        
-        // IMPORTANT: Only add individual types, NOT correlation type
-        if let systolicType = bloodPressureSystolicType {
-            typesToShare.insert(systolicType)
-            typesToRead.insert(systolicType)
-        }
-        
-        if let diastolicType = bloodPressureDiastolicType {
-            typesToShare.insert(diastolicType)
-            typesToRead.insert(diastolicType)
-        }
-        
-        if let heartRateType = heartRateType {
-            typesToShare.insert(heartRateType)
-            typesToRead.insert(heartRateType)
-        }
-        
-        // Request authorization
-        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                print("Authorization error: \(error.localizedDescription)")
-            }
-            
-            DispatchQueue.main.async {
-                self.isRequestingPermission = false
-                
-                // Re-check permissions
-                self.checkPermissionStatus()
-                
-                // Report success if any permissions were granted
-                let anyAccess = self.authorizationStatus == .fullAccess ||
-                                self.authorizationStatus == .partialAccess
-                completion?(anyAccess)
-            }
+            syncState = .completed(count: 0)
         }
     }
     
-    // Prepare for sync
-    func prepareSync(_ readings: [BloodPressureReading]) {
-        // Re-check permissions
-        checkPermissionStatus()
-        
-        // If no permissions at all, need to request
-        if authorizationStatus == .denied || authorizationStatus == .notDetermined {
-            requestAuthorization { [weak self] success in
-                guard let self = self, success else { return }
-                self.prepareSync(readings)
-            }
-            return
-        }
-        
-        // If we don't have permission for at least systolic or diastolic, can't sync
-        if !hasSystolicPermission && !hasDiastolicPermission {
-            DispatchQueue.main.async {
-                self.syncStatus = .failed("No blood pressure permissions")
-            }
-            return
-        }
-        
-        // Continue with sync preparation
-        DispatchQueue.main.async {
-            self.syncStatus = .checking
-            self.existingReadingsCount = 0
-            self.readingsToSyncCount = readings.count
-            self.duplicateReadingsCount = 0
-            self.showingSyncModal = true
-        }
+    func executeSync(readings: [BloodPressureReading]) async {
+        await performSync(readings: readings)
     }
     
-    // Execute the sync with individual readings or correlation based on permissions
-    func executeSync(_ readings: [BloodPressureReading]) {
-        syncStatus = .syncing
+    private func performSync(readings: [BloodPressureReading]) async {
+        syncState = .syncing(progress: 0)
         showingSyncModal = false
         
-        guard let healthStore = healthStore else {
-            syncStatus = .failed("HealthKit not available")
-            return
-        }
-        
-        // Track our progress
-        var successCount = 0
-        var failedCount = 0
-        let group = DispatchGroup()
-        
-        for reading in readings {
-            group.enter()
-            
-            // Try to save with correlation if available, otherwise fall back to individual readings
-            saveReading(reading, healthStore: healthStore) { success, error in
-                if success {
-                    successCount += 1
-                } else {
-                    failedCount += 1
-                    if let error = error {
-                        print("Error saving reading: \(error.localizedDescription)")
-                    }
-                }
-                group.leave()
-            }
-        }
-        
-        group.notify(queue: .main) {
-            if failedCount == 0 {
-                self.syncStatus = .completed(successCount)
-            } else if successCount > 0 {
-                self.syncStatus = .completed(successCount)
-            } else {
-                self.syncStatus = .failed("Failed to sync readings")
-            }
-        }
-    }
-    
-    // Save reading with appropriate strategy based on permissions
-    private func saveReading(_ reading: BloodPressureReading,
-                           healthStore: HKHealthStore,
-                           completion: @escaping (Bool, Error?) -> Void) {
-        
-        // Get combined date
-        let combinedDate = createCombinedDate(from: reading)
-        guard let date = combinedDate else {
-            completion(false, nil)
-            return
-        }
-        
-        // If we have permission for both systolic and diastolic, try to use correlation
-        if hasSystolicPermission && hasDiastolicPermission {
-            saveBPWithCorrelation(reading, date: date, healthStore: healthStore) { success, error in
-                if success {
-                    // If correlation succeeds, also try to save heart rate
-                    if self.hasHeartRatePermission, let heartRateType = self.heartRateType {
-                        self.saveHeartRate(reading, date: date, heartRateType: heartRateType,
-                                          healthStore: healthStore) { _, _ in
-                            // Return success even if heart rate fails
-                            completion(true, nil)
-                        }
-                    } else {
-                        completion(true, nil)
-                    }
-                } else {
-                    // If correlation fails, try individual readings as fallback
-                    self.saveIndividualReadings(reading, date: date, healthStore: healthStore, completion: completion)
-                }
-            }
-        } else {
-            // Otherwise just save individual readings
-            saveIndividualReadings(reading, date: date, healthStore: healthStore, completion: completion)
-        }
-    }
-    
-    // Save BP as correlation
-    private func saveBPWithCorrelation(_ reading: BloodPressureReading,
-                                      date: Date,
-                                      healthStore: HKHealthStore,
-                                      completion: @escaping (Bool, Error?) -> Void) {
-        
-        guard let systolicType = bloodPressureSystolicType,
-              let diastolicType = bloodPressureDiastolicType else {
-            completion(false, nil)
-            return
-        }
-        
-        // Create samples
-        let systolicValue = HKQuantity(unit: HKUnit.millimeterOfMercury(),
-                                     doubleValue: Double(reading.systolic))
-        let diastolicValue = HKQuantity(unit: HKUnit.millimeterOfMercury(),
-                                      doubleValue: Double(reading.diastolic))
-        
-        let systolicSample = HKQuantitySample(
-            type: systolicType,
-            quantity: systolicValue,
-            start: date,
-            end: date
-        )
-        
-        let diastolicSample = HKQuantitySample(
-            type: diastolicType,
-            quantity: diastolicValue,
-            start: date,
-            end: date
-        )
-        
-        // Create the correlation type at runtime - don't store it as property
-        if let correlationType = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
-            // Create correlation with samples
-            let objects: Set<HKSample> = [systolicSample, diastolicSample]
-            
-            let correlation = HKCorrelation(
-                type: correlationType,
-                start: date,
-                end: date,
-                objects: objects
+        do {
+            let syncer = HealthDataSyncer(
+                healthStore: healthStore,
+                bpTypes: bpTypes,
+                permissions: getCurrentPermissions()
             )
             
-            // Try to save the correlation
-            healthStore.save(correlation) { success, error in
-                completion(success, error)
+            let syncedCount = try await syncer.syncReadings(readings) { progress in
+                await MainActor.run {
+                    self.syncState = .syncing(progress: progress)
+                }
             }
-        } else {
-            // Correlation type not available, fallback to individual samples
-            completion(false, nil)
+            
+            syncState = .completed(count: syncedCount)
+            
+        } catch {
+            syncState = .failed(error: .syncFailed(underlying: error))
         }
     }
     
-    // Save readings as individual samples
-    private func saveIndividualReadings(_ reading: BloodPressureReading,
-                                       date: Date,
-                                       healthStore: HKHealthStore,
-                                       completion: @escaping (Bool, Error?) -> Void) {
+    // MARK: - Helper Methods
+    private func getCurrentPermissions() -> Set<BPPermission> {
+        switch authStatus {
+        case .partial(let permissions): return permissions
+        case .full: return Set(BPPermission.allCases)
+        default: return []
+        }
+    }
+    
+    private func countDuplicates(readings: [BloodPressureReading]) async -> Int {
+        // Simplified duplicate detection - in production you'd query HealthKit
+        // This is a placeholder that assumes you have some local tracking
+        return 0
+    }
+}
+
+// MARK: - Supporting Types
+private struct BPQuantityTypes {
+    let systolic: HKQuantityType?
+    let diastolic: HKQuantityType?
+    let heartRate: HKQuantityType?
+    
+    var allValidTypes: [HKQuantityType] {
+        [systolic, diastolic, heartRate].compactMap { $0 }
+    }
+    
+    func checkPermissions(healthStore: HKHealthStore) async -> Set<HealthKitManager.BPPermission> {
+        var permissions: Set<HealthKitManager.BPPermission> = []
         
-        let group = DispatchGroup()
-        var successCount = 0
-        var typesAvailable = 0
+        if let systolic = systolic,
+           healthStore.authorizationStatus(for: systolic) == .sharingAuthorized {
+            permissions.insert(.systolic)
+        }
         
-        // Try systolic
-        if hasSystolicPermission, let systolicType = bloodPressureSystolicType {
-            typesAvailable += 1
-            group.enter()
-            
-            let systolicValue = HKQuantity(unit: HKUnit.millimeterOfMercury(),
-                                         doubleValue: Double(reading.systolic))
-            let systolicSample = HKQuantitySample(
+        if let diastolic = diastolic,
+           healthStore.authorizationStatus(for: diastolic) == .sharingAuthorized {
+            permissions.insert(.diastolic)
+        }
+        
+        if let heartRate = heartRate,
+           healthStore.authorizationStatus(for: heartRate) == .sharingAuthorized {
+            permissions.insert(.heartRate)
+        }
+        
+        return permissions
+    }
+}
+
+// MARK: - Sync Engine
+private struct HealthDataSyncer {
+    let healthStore: HKHealthStore
+    let bpTypes: BPQuantityTypes
+    let permissions: Set<HealthKitManager.BPPermission>
+    
+    func syncReadings(_ readings: [BloodPressureReading],
+                     progressCallback: @escaping (Double) async -> Void) async throws -> Int {
+        
+        var syncedCount = 0
+        let total = readings.count
+        
+        for (index, reading) in readings.enumerated() {
+            do {
+                let wasSynced = try await syncSingleReading(reading)
+                if wasSynced { syncedCount += 1 }
+                
+                // Update progress
+                let progress = Double(index + 1) / Double(total)
+                await progressCallback(progress)
+                
+            } catch {
+                // Log error but continue with other readings
+                print("Failed to sync reading: \(error)")
+            }
+        }
+        
+        return syncedCount
+    }
+    
+    private func syncSingleReading(_ reading: BloodPressureReading) async throws -> Bool {
+        guard let date = combineDateTime(reading: reading) else { return false }
+        
+        var samples: [HKQuantitySample] = []
+        
+        // Create samples based on available permissions
+        if permissions.contains(.systolic), let systolicType = bpTypes.systolic {
+            let sample = HKQuantitySample(
                 type: systolicType,
-                quantity: systolicValue,
+                quantity: HKQuantity(unit: .millimeterOfMercury(), doubleValue: Double(reading.systolic)),
                 start: date,
                 end: date
             )
-            
-            healthStore.save(systolicSample) { success, _ in
-                if success { successCount += 1 }
-                group.leave()
-            }
+            samples.append(sample)
         }
         
-        // Try diastolic
-        if hasDiastolicPermission, let diastolicType = bloodPressureDiastolicType {
-            typesAvailable += 1
-            group.enter()
-            
-            let diastolicValue = HKQuantity(unit: HKUnit.millimeterOfMercury(),
-                                          doubleValue: Double(reading.diastolic))
-            let diastolicSample = HKQuantitySample(
+        if permissions.contains(.diastolic), let diastolicType = bpTypes.diastolic {
+            let sample = HKQuantitySample(
                 type: diastolicType,
-                quantity: diastolicValue,
+                quantity: HKQuantity(unit: .millimeterOfMercury(), doubleValue: Double(reading.diastolic)),
                 start: date,
                 end: date
             )
-            
-            healthStore.save(diastolicSample) { success, _ in
-                if success { successCount += 1 }
-                group.leave()
+            samples.append(sample)
+        }
+        
+        if permissions.contains(.heartRate), let heartRateType = bpTypes.heartRate {
+            let sample = HKQuantitySample(
+                type: heartRateType,
+                quantity: HKQuantity(unit: .hertz(), doubleValue: Double(reading.heartRate) / 60.0),
+                start: date,
+                end: date
+            )
+            samples.append(sample)
+        }
+        
+        // Save samples
+        try await withCheckedThrowingContinuation { continuation in
+            healthStore.save(samples) { success, error in
+                if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: error ?? HealthKitManager.HealthKitError.syncFailed(underlying: NSError()))
+                }
             }
         }
         
-        // Try heart rate
-        if hasHeartRatePermission, let heartRateType = heartRateType {
-            typesAvailable += 1
-            group.enter()
-            
-            saveHeartRate(reading, date: date, heartRateType: heartRateType, healthStore: healthStore) { success, _ in
-                if success { successCount += 1 }
-                group.leave()
-            }
-        }
-        
-        // Complete when all operations are done
-        group.notify(queue: .main) {
-            let success = successCount > 0
-            completion(success, nil)
-        }
+        return !samples.isEmpty
     }
     
-    // Helper to save heart rate
-    private func saveHeartRate(_ reading: BloodPressureReading,
-                              date: Date,
-                              heartRateType: HKQuantityType,
-                              healthStore: HKHealthStore,
-                              completion: @escaping (Bool, Error?) -> Void) {
+    private func combineDateTime(reading: BloodPressureReading) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
         
-        let heartRateValue = HKQuantity(
-            unit: HKUnit.count().unitDivided(by: HKUnit.minute()),
-            doubleValue: Double(reading.heartRate)
-        )
+        guard let timeDate = formatter.date(from: reading.time) else { return nil }
         
-        let heartRateSample = HKQuantitySample(
-            type: heartRateType,
-            quantity: heartRateValue,
-            start: date,
-            end: date
-        )
-        
-        healthStore.save(heartRateSample, withCompletion: completion)
-    }
-    
-    // Helper to create date from reading
-    private func createCombinedDate(from reading: BloodPressureReading) -> Date? {
         let calendar = Calendar.current
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "HH:mm"
-        
-        guard let timeDate = dateFormatter.date(from: reading.time) else {
-            return nil
-        }
-        
         let timeComponents = calendar.dateComponents([.hour, .minute], from: timeDate)
         let dateComponents = calendar.dateComponents([.year, .month, .day], from: reading.date)
         
