@@ -5,123 +5,249 @@ struct AllReadingsView: View {
     @State private var searchText = ""
     @State private var showingAdvancedFilters = false
     @State private var selectedClassification: BPClassification?
+    @State private var animateList = false
     
     var body: some View {
-        VStack {
-            // Add advanced filters section
-            if showingAdvancedFilters {
-                advancedFiltersView
-                    .transition(.opacity)
-            }
+        ZStack {
+            Color.primaryBackground.ignoresSafeArea()
             
-            List {
-                ForEach(groupedReadings, id: \.date) { group in
-                    Section(header: dateHeader(for: group.date)) {
-                        ForEach(group.readings) { reading in
-                            ReadingRowView(reading: reading)
-                        }
-                    }
+            VStack(spacing: 0) {
+                // Custom navigation header
+                customHeader
+                    .padding(.bottom, 16)
+                
+                // Advanced filters
+                if showingAdvancedFilters {
+                    advancedFiltersView
+                        .transition(.asymmetric(
+                            insertion: .push(from: .top).combined(with: .opacity),
+                            removal: .push(from: .bottom).combined(with: .opacity)
+                        ))
                 }
                 
+                // Main content
                 if groupedReadings.isEmpty {
-                    Section {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 16) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.secondary)
-                                
-                                Text("No readings match your search")
-                                    .font(.headline)
-                                    .foregroundColor(.secondary)
-                                
-                                if !searchText.isEmpty {
-                                    Button("Clear Search") {
-                                        searchText = ""
-                                        selectedClassification = nil
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
+                    emptyStateView
+                        .frame(maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 16) {
+                            ForEach(groupedReadings, id: \.date) { group in
+                                dateSection(for: group)
+                                    .transition(.asymmetric(
+                                        insertion: .push(from: .leading).combined(with: .opacity),
+                                        removal: .push(from: .trailing).combined(with: .opacity)
+                                    ))
                             }
-                            .padding()
-                            Spacer()
                         }
-                        .listRowBackground(Color.clear)
-                    }
-                }
-            }
-            .navigationTitle("All Readings")
-            .searchable(text: $searchText, prompt: "Search by date, values, or status")
-            .background(Color.mainBackground.ignoresSafeArea())
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        withAnimation {
-                            showingAdvancedFilters.toggle()
-                        }
-                    }) {
-                        Label(showingAdvancedFilters ? "Hide Filters" : "Filter",
-                              systemImage: showingAdvancedFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 100)
                     }
                 }
             }
         }
+        .navigationBarHidden(true)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                animateList = true
+            }
+        }
+    }
+    
+    private var customHeader: some View {
+        VStack(spacing: 16) {
+            // Navigation bar
+            HStack {
+                Button(action: {
+                    // Navigate back
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .foregroundColor(.primaryAccent)
+                }
+                
+                Spacer()
+                
+                Text("All Readings")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primaryText)
+                
+                Spacer()
+                
+                IconActionButton(
+                    icon: showingAdvancedFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle",
+                    size: 36,
+                    color: showingAdvancedFilters ? .primaryAccent : .secondaryText
+                ) {
+                    withAnimation(.spring(response: 0.3)) {
+                        showingAdvancedFilters.toggle()
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            
+            // Search bar
+            searchBar
+        }
+    }
+    
+    private var searchBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16))
+                .foregroundColor(.secondaryText)
+            
+            TextField("Search by date, values, or status", text: $searchText)
+                .font(.system(size: 16))
+                .foregroundColor(.primaryText)
+                .accentColor(.primaryAccent)
+            
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondaryText)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.tertiaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.glassBorder, lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 20)
     }
     
     private var advancedFiltersView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Filter by Classification")
                 .font(.headline)
+                .foregroundColor(.primaryText)
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Button(action: {
+                    FilterChip(
+                        title: "All",
+                        isSelected: selectedClassification == nil,
+                        color: .primaryAccent
+                    ) {
                         selectedClassification = nil
-                    }) {
-                        Text("All")
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(selectedClassification == nil ? Color.blue : Color.secondary.opacity(0.2))
-                            .foregroundColor(selectedClassification == nil ? .white : .primary)
-                            .cornerRadius(16)
                     }
                     
                     ForEach([BPClassification.normal, .elevated, .hypertensionStage1, .hypertensionStage2, .crisis]) { classification in
-                        Button(action: {
+                        FilterChip(
+                            title: classification.rawValue,
+                            isSelected: selectedClassification == classification,
+                            color: classificationColor(classification)
+                        ) {
                             selectedClassification = classification
-                        }) {
-                            HStack {
-                                Circle()
-                                    .fill(classification.color)
-                                    .frame(width: 8, height: 8)
-                                Text(classification.rawValue)
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(selectedClassification == classification ? classification.color : Color.secondary.opacity(0.2))
-                            .foregroundColor(selectedClassification == classification ? .white : .primary)
-                            .cornerRadius(16)
                         }
                     }
                 }
             }
-            
-            Divider()
         }
-        .padding()
-        .background(Color.secondaryBackground)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            Color.secondaryBackground
+                .overlay(
+                    Rectangle()
+                        .fill(Color.glassBorder)
+                        .frame(height: 1),
+                    alignment: .bottom
+                )
+        )
     }
     
-    // Group readings by date (day)
+    private func dateSection(for group: ReadingGroup) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Date header
+            HStack {
+                Text(formatDateHeader(group.date))
+                    .font(.headline)
+                    .foregroundColor(.primaryText)
+                
+                Spacer()
+                
+                Text("\(group.readings.count) readings")
+                    .font(.caption)
+                    .foregroundColor(.secondaryText)
+            }
+            .padding(.bottom, 4)
+            
+            // Readings
+            VStack(spacing: 12) {
+                ForEach(Array(group.readings.enumerated()), id: \.element.id) { index, reading in
+                    HorizontalReadingCard(reading: reading)
+                        .opacity(animateList ? 1 : 0)
+                        .offset(x: animateList ? 0 : -50)
+                        .animation(
+                            .spring(response: 0.5, dampingFraction: 0.8)
+                            .delay(Double(index) * 0.05),
+                            value: animateList
+                        )
+                }
+            }
+        }
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 24) {
+            Image(systemName: searchText.isEmpty ? "doc.text.magnifyingglass" : "magnifyingglass")
+                .font(.system(size: 60))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color.primaryAccent, Color.secondaryAccent],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .symbolEffect(.pulse)
+            
+            VStack(spacing: 8) {
+                Text(searchText.isEmpty ? "No Readings Found" : "No Results")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primaryText)
+                
+                Text(searchText.isEmpty ? "Your readings will appear here once imported" : "Try adjusting your search or filters")
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondaryText)
+            }
+            
+            if !searchText.isEmpty || selectedClassification != nil {
+                Button(action: {
+                    searchText = ""
+                    selectedClassification = nil
+                }) {
+                    Text("Clear Filters")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primaryAccent)
+                }
+            }
+        }
+        .padding(.horizontal, 40)
+    }
+    
+    // MARK: - Data Processing
+    
     private var groupedReadings: [ReadingGroup] {
         let calendar = Calendar.current
-        
-        // First get filtered readings
         let readings = filteredReadings
         
-        // Group by date (day)
         var groupedByDay: [Date: [BloodPressureReading]] = [:]
         
         for reading in readings {
@@ -133,7 +259,6 @@ struct AllReadingsView: View {
             }
         }
         
-        // Convert dictionary to array of ReadingGroup
         return groupedByDay.map { (date, readings) in
             ReadingGroup(date: date, readings: readings)
         }.sorted(by: { $0.date > $1.date })
@@ -142,7 +267,6 @@ struct AllReadingsView: View {
     private var filteredReadings: [BloodPressureReading] {
         var readings = dataStore.allReadings
         
-        // First apply classification filter if selected
         if let classification = selectedClassification {
             readings = readings.filter { reading in
                 let readingClassification = BPClassificationService.shared.classify(
@@ -153,23 +277,19 @@ struct AllReadingsView: View {
             }
         }
         
-        // Then apply text search if any
         if searchText.isEmpty {
             return readings.sorted(by: { $0.date > $1.date })
         } else {
             return readings.filter { reading in
-                // Format date for searching
                 let dateFormatter = DateFormatter()
                 dateFormatter.dateFormat = "MMM d, yyyy"
                 let dateString = dateFormatter.string(from: reading.date)
                 
-                // Get classification for this reading
                 let classification = BPClassificationService.shared.classify(
                     systolic: reading.systolic,
                     diastolic: reading.diastolic
                 )
                 
-                // Create a combined string of all searchable terms
                 let searchableText = [
                     dateString.lowercased(),
                     reading.time.lowercased(),
@@ -180,149 +300,87 @@ struct AllReadingsView: View {
                     reading.readingType.rawValue.lowercased()
                 ].joined(separator: " ")
                 
-                // Check direct matches
                 if searchableText.localizedCaseInsensitiveContains(searchText.lowercased()) {
                     return true
                 }
                 
-                // Check if search term matches a classification
                 if let matchedClassification = BPClassificationService.shared.matchesClassification(searchTerm: searchText),
                    matchedClassification == classification {
                     return true
                 }
                 
-                // Not a match
                 return false
             }
             .sorted(by: { $0.date > $1.date })
         }
     }
     
-    private func dateHeader(for date: Date) -> some View {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEEE, MMM d, yyyy"
+    // MARK: - Helper Methods
+    
+    private func formatDateHeader(_ date: Date) -> String {
+        let formatter = DateFormatter()
         
-        return HStack {
-            Text(dateFormatter.string(from: date))
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            Spacer()
-            
-            // Count of readings for this day
-            let count = groupedReadings.first(where: { $0.date == date })?.readings.count ?? 0
-            Text("\(count) readings")
-                .font(.caption)
-                .foregroundColor(.secondary)
+        if Calendar.current.isDateInToday(date) {
+            return "Today"
+        } else if Calendar.current.isDateInYesterday(date) {
+            return "Yesterday"
+        } else {
+            formatter.dateFormat = "EEEE, MMM d"
+            return formatter.string(from: date)
+        }
+    }
+    
+    private func classificationColor(_ classification: BPClassification) -> Color {
+        switch classification {
+        case .normal: return .bpNormal
+        case .elevated: return .bpElevated
+        case .hypertensionStage1: return .bpStage1
+        case .hypertensionStage2: return .bpStage2
+        case .crisis: return .bpCrisis
         }
     }
 }
 
-// Model for grouped readings
+// MARK: - Supporting Views
+
+struct FilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let color: Color
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                }
+                
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(isSelected ? .semibold : .medium)
+            }
+            .foregroundColor(isSelected ? .white : color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(isSelected ? color : color.opacity(0.1))
+                    .overlay(
+                        Capsule()
+                            .stroke(color.opacity(isSelected ? 0 : 0.3), lineWidth: 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.05 : 1)
+            .animation(.spring(response: 0.3), value: isSelected)
+        }
+    }
+}
+
+// Keep the existing ReadingGroup struct
 struct ReadingGroup {
     let date: Date
     let readings: [BloodPressureReading]
-}
-
-struct ReadingRowView: View {
-    let reading: BloodPressureReading
-    
-    // Get classification from central service
-    private var classification: BPClassification {
-        BPClassificationService.shared.classify(
-            systolic: reading.systolic,
-            diastolic: reading.diastolic
-        )
-    }
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(reading.time)
-                    .font(.headline)
-                
-                if reading.readingType != .normal && reading.readingType != .initialization {
-                    readingTypeLabel
-                }
-                
-                // Add the classification label
-                HStack {
-                    Circle()
-                        .fill(classification.color)
-                        .frame(width: 8, height: 8)
-                    Text(classification.rawValue)
-                        .font(.caption)
-                        .foregroundColor(classification.color)
-                }
-            }
-            
-            Spacer()
-            
-            HStack(spacing: 16) {
-                BPValueView(
-                    value: reading.systolic,
-                    label: "SYS",
-                    color: BPClassificationService.shared.systolicColor(reading.systolic)
-                )
-                
-                BPValueView(
-                    value: reading.diastolic,
-                    label: "DIA",
-                    color: BPClassificationService.shared.diastolicColor(reading.diastolic)
-                )
-                
-                // Modified to use white color for heart rate
-                BPValueView(
-                    value: reading.heartRate,
-                    label: "BPM",
-                    color: .white,
-                    bgColor: .white.opacity(0.2)
-                )
-            }
-        }
-        .padding(.vertical, 4)
-    }
-    
-    private var readingTypeLabel: some View {
-        Group {
-            switch reading.readingType {
-            case .initialization:
-                // Don't show initialization
-                EmptyView()
-            case .cuffMeasurement:
-                Label("Cuff", systemImage: "rectangle.fill")
-                    .font(.caption)
-                    .foregroundColor(.blue)
-            case .onDemandPhone:
-                Label("Phone", systemImage: "phone.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            case .normal:
-                EmptyView()
-            }
-        }
-    }
-}
-
-struct BPValueView: View {
-    let value: Int
-    let label: String
-    let color: Color
-    var bgColor: Color? = nil
-    
-    var body: some View {
-        VStack(spacing: 2) {
-            Text("\(value)")
-                .font(.headline)
-                .foregroundColor(color)
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .frame(width: 44)
-        .padding(.vertical, 4)
-        .padding(.horizontal, 2)
-        .background(bgColor ?? color.opacity(0.1))
-        .cornerRadius(6)
-    }
 }

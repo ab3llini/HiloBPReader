@@ -172,10 +172,73 @@ class HealthKitManager: ObservableObject {
         }
     }
     
+    // IMPROVED: Actually check for duplicates in HealthKit
     private func countDuplicates(readings: [BloodPressureReading]) async -> Int {
-        // Simplified duplicate detection - in production you'd query HealthKit
-        // This is a placeholder that assumes you have some local tracking
-        return 0
+        guard let systolicType = bpTypes.systolic else { return 0 }
+        
+        // Get date range for query
+        let sortedDates = readings.map { $0.date }.sorted()
+        guard let startDate = sortedDates.first,
+              let endDate = sortedDates.last else { return 0 }
+        
+        // Query existing readings in date range
+        let predicate = HKQuery.predicateForSamples(
+            withStart: startDate,
+            end: Calendar.current.date(byAdding: .day, value: 1, to: endDate),
+            options: .strictStartDate
+        )
+        
+        let existingReadings: [HKSample] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: systolicType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                continuation.resume(returning: samples ?? [])
+            }
+            healthStore.execute(query)
+        }
+        
+        // Create set of existing reading timestamps
+        let existingTimestamps = Set(existingReadings.map { $0.startDate })
+        
+        // Count how many of our readings match existing timestamps
+        var duplicateCount = 0
+        for reading in readings {
+            if let combinedDate = combineDateTime(reading: reading) {
+                // Check if a reading exists within 1 minute of this timestamp
+                let hasMatch = existingTimestamps.contains { existing in
+                    abs(existing.timeIntervalSince(combinedDate)) < 60
+                }
+                if hasMatch {
+                    duplicateCount += 1
+                }
+            }
+        }
+        
+        return duplicateCount
+    }
+    
+    // Helper to combine date and time (moved from HealthDataSyncer)
+    private func combineDateTime(reading: BloodPressureReading) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        
+        guard let timeDate = formatter.date(from: reading.time) else { return nil }
+        
+        let calendar = Calendar.current
+        let timeComponents = calendar.dateComponents([.hour, .minute], from: timeDate)
+        let dateComponents = calendar.dateComponents([.year, .month, .day], from: reading.date)
+        
+        var combined = DateComponents()
+        combined.year = dateComponents.year
+        combined.month = dateComponents.month
+        combined.day = dateComponents.day
+        combined.hour = timeComponents.hour
+        combined.minute = timeComponents.minute
+        
+        return calendar.date(from: combined)
     }
 }
 
@@ -220,10 +283,13 @@ private struct HealthDataSyncer {
     func syncReadings(_ readings: [BloodPressureReading],
                      progressCallback: @escaping (Double) async -> Void) async throws -> Int {
         
-        var syncedCount = 0
-        let total = readings.count
+        // First, filter out duplicates
+        let uniqueReadings = try await filterDuplicateReadings(readings)
         
-        for (index, reading) in readings.enumerated() {
+        var syncedCount = 0
+        let total = uniqueReadings.count
+        
+        for (index, reading) in uniqueReadings.enumerated() {
             do {
                 let wasSynced = try await syncSingleReading(reading)
                 if wasSynced { syncedCount += 1 }
@@ -239,6 +305,54 @@ private struct HealthDataSyncer {
         }
         
         return syncedCount
+    }
+    
+    // Filter out readings that already exist in HealthKit
+    private func filterDuplicateReadings(_ readings: [BloodPressureReading]) async throws -> [BloodPressureReading] {
+        guard let systolicType = bpTypes.systolic else { return readings }
+        
+        // Get date range for query
+        let sortedDates = readings.compactMap { combineDateTime(reading: $0) }.sorted()
+        guard let startDate = sortedDates.first,
+              let endDate = sortedDates.last else { return readings }
+        
+        // Query existing readings
+        let predicate = HKQuery.predicateForSamples(
+            withStart: startDate,
+            end: Calendar.current.date(byAdding: .day, value: 1, to: endDate),
+            options: .strictStartDate
+        )
+        
+        let existingSamples: [HKSample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: systolicType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: samples ?? [])
+                }
+            }
+            healthStore.execute(query)
+        }
+        
+        // Create set of existing timestamps
+        let existingTimestamps = Set(existingSamples.map { $0.startDate })
+        
+        // Filter out duplicates
+        return readings.filter { reading in
+            guard let combinedDate = combineDateTime(reading: reading) else { return true }
+            
+            // Check if a reading exists within 1 minute of this timestamp
+            let isDuplicate = existingTimestamps.contains { existing in
+                abs(existing.timeIntervalSince(combinedDate)) < 60
+            }
+            
+            return !isDuplicate
+        }
     }
     
     private func syncSingleReading(_ reading: BloodPressureReading) async throws -> Bool {

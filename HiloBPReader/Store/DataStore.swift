@@ -11,10 +11,10 @@ class DataStore: ObservableObject {
         }
     }
     
-    @Published var currentReport: BloodPressureReport? {
+    // Track all imported reports for metadata purposes (optional)
+    @Published var importedReports: [ImportedReportMetadata] = [] {
         didSet {
-            print("📋 currentReport changed: \(oldValue?.memberName ?? "nil") → \(currentReport?.memberName ?? "nil")")
-            saveCurrentReportToStorage()
+            saveReportMetadataToStorage()
         }
     }
     
@@ -25,8 +25,8 @@ class DataStore: ObservableObject {
         documentsDirectory.appendingPathComponent("bp_readings.json")
     }
     
-    private var currentReportURL: URL {
-        documentsDirectory.appendingPathComponent("current_report.json")
+    private var reportsMetadataURL: URL {
+        documentsDirectory.appendingPathComponent("imported_reports.json")
     }
     
     // MARK: - Cache properties
@@ -58,16 +58,16 @@ class DataStore: ObservableObject {
             self.allReadings = []
         }
         
-        // Load current report
+        // Load report metadata (optional)
         do {
-            let reportData = try Data(contentsOf: currentReportURL)
+            let metadataData = try Data(contentsOf: reportsMetadataURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            self.currentReport = try decoder.decode(BloodPressureReport.self, from: reportData)
-            print("✅ Loaded current report: \(currentReport?.memberName ?? "Unknown")")
+            self.importedReports = try decoder.decode([ImportedReportMetadata].self, from: metadataData)
+            print("✅ Loaded \(importedReports.count) report metadata entries")
         } catch {
-            print("📱 No previous report found: \(error.localizedDescription)")
-            self.currentReport = nil
+            print("📱 No previous report metadata found: \(error.localizedDescription)")
+            self.importedReports = []
         }
     }
     
@@ -85,35 +85,39 @@ class DataStore: ObservableObject {
         }
     }
     
-    private func saveCurrentReportToStorage() {
-        guard let report = currentReport else {
-            try? FileManager.default.removeItem(at: currentReportURL)
-            print("🗑️ Removed current report file")
-            return
-        }
-        
-        print("💾 Saving current report: \(report.memberName)")
+    private func saveReportMetadataToStorage() {
+        print("💾 Saving report metadata...")
         
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(report)
-            try data.write(to: currentReportURL, options: .atomic)
-            print("✅ Successfully saved current report")
+            let data = try encoder.encode(importedReports)
+            try data.write(to: reportsMetadataURL, options: .atomic)
+            print("✅ Successfully saved report metadata")
         } catch {
-            print("❌ Failed to save current report: \(error.localizedDescription)")
+            print("❌ Failed to save report metadata: \(error.localizedDescription)")
         }
     }
     
     // MARK: - Public Methods
-    func setCurrentReport(_ report: BloodPressureReport?) {
-        print("📋 Setting current report: \(report?.memberName ?? "nil")")
-        currentReport = report
+    func importReport(_ report: BloodPressureReport) {
+        print("📋 Importing report from \(report.month) \(report.year) with \(report.readings.count) readings")
         
-        if let report = report {
-            print("📊 Adding \(report.readings.count) readings from report")
-            addReadings(report.readings)
-        }
+        // Add readings
+        addReadings(report.readings)
+        
+        // Track the import metadata
+        let metadata = ImportedReportMetadata(
+            id: UUID(),
+            memberName: report.memberName,
+            month: report.month,
+            year: report.year,
+            importDate: Date(),
+            readingCount: report.readings.count
+        )
+        importedReports.append(metadata)
+        
+        print("✅ Import complete")
     }
     
     func addReadings(_ newReadings: [BloodPressureReading]) {
@@ -141,11 +145,31 @@ class DataStore: ObservableObject {
     func clearAllData() {
         print("🗑️ Clearing all data...")
         allReadings = []
-        currentReport = nil
+        importedReports = []
         
         try? FileManager.default.removeItem(at: readingsURL)
-        try? FileManager.default.removeItem(at: currentReportURL)
+        try? FileManager.default.removeItem(at: reportsMetadataURL)
         print("🗑️ Cleared all data and storage files")
+    }
+    
+    // MARK: - Computed Properties
+    var totalReadingsCount: Int {
+        allReadings.count
+    }
+    
+    var dateRange: String {
+        guard let firstDate = allReadings.map({ $0.date }).min(),
+              let lastDate = allReadings.map({ $0.date }).max() else {
+            return "No data"
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return "\(formatter.string(from: firstDate)) - \(formatter.string(from: lastDate))"
+    }
+    
+    var uniqueMemberNames: [String] {
+        Array(Set(importedReports.map { $0.memberName }))
     }
     
     // MARK: - Cached computed properties
@@ -231,6 +255,16 @@ class DataStore: ObservableObject {
         let dateString = formatter.string(from: reading.date)
         return "\(dateString)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
     }
+}
+
+// MARK: - Supporting Models
+struct ImportedReportMetadata: Codable, Identifiable {
+    let id: UUID
+    let memberName: String
+    let month: String
+    let year: String
+    let importDate: Date
+    let readingCount: Int
 }
 
 // MARK: - Stats model

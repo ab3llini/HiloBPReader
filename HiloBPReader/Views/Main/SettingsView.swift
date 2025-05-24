@@ -60,29 +60,58 @@ struct SettingsView: View {
                 }
                 
                 Section {
+                    // Total readings with icon
+                    HStack {
+                        Label("Total Readings", systemImage: "waveform.path.ecg")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text("\(dataStore.totalReadingsCount)")
+                            .foregroundColor(.secondary)
+                            .font(.system(.body, design: .rounded))
+                    }
+                    
+                    // Date range with icon
+                    HStack {
+                        Label("Date Range", systemImage: "calendar")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text(dataStore.dateRange)
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    }
+                    
+                    // Imported reports count
+                    HStack {
+                        Label("Reports Imported", systemImage: "doc.fill")
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Text("\(dataStore.importedReports.count)")
+                            .foregroundColor(.secondary)
+                            .font(.system(.body, design: .rounded))
+                    }
+                    
+                    // Users (if multiple people use the app)
+                    if dataStore.uniqueMemberNames.count > 1 {
+                        HStack {
+                            Label("Users", systemImage: "person.2.fill")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(dataStore.uniqueMemberNames.joined(separator: ", "))
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                } header: {
+                    Text("Data Summary")
+                }
+                
+                Section {
                     HStack {
                         Text("Version")
                         Spacer()
                         Text("1.0.0")
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    HStack {
-                        Text("Current Report")
-                        Spacer()
-                        if let report = dataStore.currentReport {
-                            Text("\(report.month) \(report.year) (\(report.readings.count) readings)")
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("None")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Total Readings")
-                        Spacer()
-                        Text("\(dataStore.allReadings.count)")
                             .foregroundColor(.secondary)
                     }
                     
@@ -91,6 +120,23 @@ struct SettingsView: View {
                             Text("Hilo Website")
                             Spacer()
                             Image(systemName: "arrow.up.right")
+                        }
+                    }
+                    
+                    // Import history (shows last few imports)
+                    if !dataStore.importedReports.isEmpty {
+                        NavigationLink(destination: ImportHistoryView()) {
+                            HStack {
+                                Text("Import History")
+                                Spacer()
+                                Text("\(dataStore.importedReports.count)")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.2))
+                                    .cornerRadius(10)
+                            }
                         }
                     }
                 } header: {
@@ -163,6 +209,43 @@ struct SettingsView: View {
         default:
             return false
         }
+    }
+}
+
+// New view for import history
+struct ImportHistoryView: View {
+    @EnvironmentObject var dataStore: DataStore
+    
+    var body: some View {
+        List {
+            ForEach(dataStore.importedReports.sorted(by: { $0.importDate > $1.importDate })) { report in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("\(report.month) \(report.year)")
+                                .font(.headline)
+                            Text(report.memberName)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing) {
+                            Text("\(report.readingCount) readings")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(report.importDate, style: .date)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .navigationTitle("Import History")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

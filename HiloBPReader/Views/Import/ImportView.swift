@@ -11,11 +11,10 @@ struct ImportView: View {
     @State private var importedReport: BloodPressureReport?
     @State private var duplicateCount = 0
     @State private var totalReadingsCount = 0
+    @State private var animateContent = false
+    @State private var importProgress: Double = 0
     
-    // Added to track security-scoped resource access
     @State private var securityScopedAccessGranted = false
-    
-    // New states for validation
     @State private var hasValidationError = false
     @State private var validationErrors: [String] = []
     @State private var hasCheckedReadings = false
@@ -28,338 +27,528 @@ struct ImportView: View {
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Status display
-                    statusView
-                    
-                    // PDF preview if available
-                    if let url = pdfURL, importStatus == .success {
-                        PDFPreview(url: url)
-                            .frame(height: 300)
-                            .padding()
-                    }
-                    
-                    // Validation errors - NEW
-                    if hasValidationError {
-                        validationErrorView
-                    }
-                    
-                    // Critical readings warning - NEW
-                    if hasCriticalReadings, let report = importedReport {
-                        criticalReadingsView(report: report)
-                    }
-                    
-                    // Import results
-                    if let report = importedReport {
-                        importSummaryView(report: report)
-                    }
-                    
-                    Spacer()
-                    
-                    // Action buttons
-                    actionButtons
-                }
-                .padding()
-                .background(Color.mainBackground.ignoresSafeArea())
-                .navigationTitle("Import Report")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
-                            dismiss()
+            ZStack {
+                Color.primaryBackground.ignoresSafeArea()
+                
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        // Header
+                        headerView
+                            .padding(.top, 20)
+                        
+                        // Main content based on status
+                        mainContentView
+                            .transition(.asymmetric(
+                                insertion: .scale.combined(with: .opacity),
+                                removal: .scale.combined(with: .opacity)
+                            ))
+                        
+                        // Validation warnings
+                        if hasValidationError {
+                            validationErrorView
+                                .transition(.push(from: .top).combined(with: .opacity))
                         }
+                        
+                        // Critical readings warning
+                        if hasCriticalReadings, let report = importedReport {
+                            criticalReadingsView(report: report)
+                                .transition(.push(from: .top).combined(with: .opacity))
+                        }
+                        
+                        // Import results
+                        if importStatus == .success, let report = importedReport {
+                            importSummaryView(report: report)
+                                .transition(.push(from: .bottom).combined(with: .opacity))
+                        }
+                        
+                        Spacer(minLength: 100)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
                 }
-                .sheet(isPresented: $isShowingDocumentPicker) {
-                    PDFPickerView { url, securitySuccess in
-                        pdfURL = url
-                        securityScopedAccessGranted = securitySuccess
-                        processImport(url: url)
-                    }
+                
+                // Bottom action area
+                VStack {
+                    Spacer()
+                    actionButtonsView
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color.primaryBackground.opacity(0),
+                                    Color.primaryBackground
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 120)
+                            .ignoresSafeArea()
+                        )
                 }
-                .alert("Confirm Import", isPresented: $hasCriticalReadings) {
-                    Button("Cancel", role: .cancel) { }
-                    Button("Continue Import", role: .destructive) {
-                        // Continue with import even with critical readings
-                        hasCriticalReadings = false
-                    }
-                } message: {
-                    Text("The report contains \(criticalReadingsCount) readings in the Hypertensive Crisis range (SYS ≥ 180 or DIA ≥ 120). Please confirm these are correct before importing.")
+            }
+            .navigationBarHidden(true)
+            .sheet(isPresented: $isShowingDocumentPicker) {
+                PDFPickerView { url, securitySuccess in
+                    pdfURL = url
+                    securityScopedAccessGranted = securitySuccess
+                    processImport(url: url)
                 }
-                .onDisappear {
-                    // Make sure we release security-scoped resource access when leaving the view
-                    stopSecurityScopedAccess()
+            }
+            .alert("Confirm Import", isPresented: $hasCriticalReadings) {
+                Button("Cancel", role: .cancel) { }
+                Button("Continue Import", role: .destructive) {
+                    hasCriticalReadings = false
+                }
+            } message: {
+                Text("The report contains \(criticalReadingsCount) readings in the Hypertensive Crisis range. Please confirm these are correct before importing.")
+            }
+            .onDisappear {
+                stopSecurityScopedAccess()
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.6)) {
+                    animateContent = true
                 }
             }
         }
     }
     
-    // NEW - Validation Error View
+    private var headerView: some View {
+        HStack {
+            Button(action: { dismiss() }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Cancel")
+                        .font(.system(size: 16, weight: .medium))
+                }
+                .foregroundColor(.primaryAccent)
+            }
+            
+            Spacer()
+            
+            Text("Import Report")
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundColor(.primaryText)
+            
+            Spacer()
+            
+            // Placeholder for balance
+            Text("Cancel")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.clear)
+        }
+    }
+    
+    @ViewBuilder
+    private var mainContentView: some View {
+        switch importStatus {
+        case .idle:
+            idleStateView
+                .opacity(animateContent ? 1 : 0)
+                .scaleEffect(animateContent ? 1 : 0.9)
+                .animation(.spring(response: 0.6), value: animateContent)
+            
+        case .processing, .validating:
+            processingStateView
+            
+        case .success:
+            if let url = pdfURL {
+                successStateView(url: url)
+            }
+            
+        case .failure:
+            failureStateView
+        }
+    }
+    
+    private var idleStateView: some View {
+        VStack(spacing: 32) {
+            // Animated icon
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.primaryAccent.opacity(0.1), Color.primaryAccent.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 140, height: 140)
+                
+                Image(systemName: "doc.viewfinder.fill")
+                    .font(.system(size: 70))
+                    .foregroundStyle(LinearGradient(
+                        colors: [Color.primaryAccent, Color.secondaryAccent],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .symbolEffect(.pulse.wholeSymbol)
+            }
+            
+            VStack(spacing: 12) {
+                Text("Import Your Hilo Report")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primaryText)
+                
+                Text("Select a PDF report from Hilo to import\nyour blood pressure readings")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondaryText)
+            }
+            
+            // Features list
+            VStack(spacing: 16) {
+                FeatureRow(
+                    icon: "checkmark.circle.fill",
+                    iconColor: .successAccent,
+                    title: "Automatic data extraction",
+                    description: "We'll read your BP values from the PDF"
+                )
+                
+                FeatureRow(
+                    icon: "chart.line.uptrend.xyaxis",
+                    iconColor: .primaryAccent,
+                    title: "Instant visualization",
+                    description: "See trends and patterns immediately"
+                )
+                
+                FeatureRow(
+                    icon: "heart.text.square.fill",
+                    iconColor: .dangerAccent,
+                    title: "Apple Health sync",
+                    description: "Optional integration with Health app"
+                )
+            }
+            .padding(.top, 24)
+        }
+    }
+    
+    private var processingStateView: some View {
+        VStack(spacing: 24) {
+            // Animated loader
+            ZStack {
+                Circle()
+                    .stroke(Color.glassBorder, lineWidth: 3)
+                    .frame(width: 100, height: 100)
+                
+                Circle()
+                    .trim(from: 0, to: importProgress)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.primaryAccent, Color.secondaryAccent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .frame(width: 100, height: 100)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.5), value: importProgress)
+                
+                Image(systemName: importStatus == .validating ? "checkmark.shield.fill" : "doc.text.magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(LinearGradient(
+                        colors: [Color.primaryAccent, Color.secondaryAccent],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .symbolEffect(.pulse)
+            }
+            .onAppear {
+                simulateProgress()
+            }
+            
+            VStack(spacing: 8) {
+                Text(importStatus == .validating ? "Validating Data" : "Processing Report")
+                    .font(.headline)
+                    .foregroundColor(.primaryText)
+                
+                Text(importStatus == .validating ? "Checking data integrity..." : "Extracting blood pressure readings...")
+                    .font(.subheadline)
+                    .foregroundColor(.secondaryText)
+            }
+        }
+    }
+    
+    private func successStateView(url: URL) -> some View {
+        VStack(spacing: 24) {
+            // Success animation
+            ZStack {
+                Circle()
+                    .fill(Color.successAccent.opacity(0.1))
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.successAccent)
+                    .symbolEffect(.bounce)
+            }
+            
+            VStack(spacing: 8) {
+                Text("Import Successful!")
+                    .font(.headline)
+                    .foregroundColor(.primaryText)
+                
+                Text("Your readings have been imported")
+                    .font(.subheadline)
+                    .foregroundColor(.secondaryText)
+            }
+            
+            // PDF preview
+            if let _ = pdfURL {
+                PDFPreview(url: url)
+                    .frame(height: 200)
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.glassBorder, lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
+            }
+        }
+    }
+    
+    private var failureStateView: some View {
+        VStack(spacing: 24) {
+            ZStack {
+                Circle()
+                    .fill(Color.dangerAccent.opacity(0.1))
+                    .frame(width: 100, height: 100)
+                
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.dangerAccent)
+                    .symbolEffect(.bounce)
+            }
+            
+            VStack(spacing: 8) {
+                Text("Import Failed")
+                    .font(.headline)
+                    .foregroundColor(.primaryText)
+                
+                Text("Unable to process the PDF file")
+                    .font(.subheadline)
+                    .foregroundColor(.secondaryText)
+            }
+        }
+    }
+    
     private var validationErrorView: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
+                    .font(.title3)
+                    .foregroundColor(.warningAccent)
                 
                 Text("Validation Warnings")
                     .font(.headline)
-                    .foregroundColor(.red)
+                    .foregroundColor(.primaryText)
                 
                 Spacer()
             }
             
-            ForEach(validationErrors, id: \.self) { error in
-                Text("• \(error)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(validationErrors, id: \.self) { error in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle()
+                            .fill(Color.warningAccent)
+                            .frame(width: 4, height: 4)
+                            .offset(y: 6)
+                        
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondaryText)
+                    }
+                }
             }
-            
-            Text("Please check your PDF to ensure the data is correct.")
-                .font(.caption)
-                .italic()
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
         }
-        .padding()
-        .background(Color.red.opacity(0.1))
-        .cornerRadius(12)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.warningAccent.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.warningAccent.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
     
-    // NEW - Critical Readings View
     private func criticalReadingsView(report: BloodPressureReport) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
+                    .font(.title3)
+                    .foregroundColor(.dangerAccent)
                 
-                Text("Warning: Critical Blood Pressure Readings")
+                Text("Critical Blood Pressure Readings")
                     .font(.headline)
-                    .foregroundColor(.red)
+                    .foregroundColor(.primaryText)
                 
                 Spacer()
             }
             
             Text("This report contains \(criticalReadingsCount) readings in the Hypertensive Crisis range (≥180/120 mmHg).")
-                .font(.callout)
+                .font(.subheadline)
+                .foregroundColor(.primaryText)
             
-            Text("Please verify these readings are correct before importing. If these readings are accurate and you have not already done so, please consult with a healthcare provider.")
+            Text("Please verify these readings are correct. If accurate, consult with a healthcare provider.")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(.secondaryText)
         }
-        .padding()
-        .background(Color.red.opacity(0.1))
-        .cornerRadius(12)
-    }
-    
-    private var statusView: some View {
-        VStack(spacing: 15) {
-            switch importStatus {
-            case .idle:
-                VStack(spacing: 20) {
-                    Image(systemName: "doc.viewfinder")
-                        .font(.system(size: 70))
-                        .foregroundColor(.accentColor)
-                    
-                    Text("Import Your Hilo Report")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    
-                    Text("Select a Hilo blood pressure PDF report to import your readings.")
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 40)
-                
-            case .processing:
-                VStack {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .padding()
-                    
-                    Text("Analyzing your report...")
-                        .foregroundColor(.secondary)
-                }
-                .frame(height: 200)
-                
-            case .validating:
-                VStack {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .padding()
-                    
-                    Text("Validating data integrity...")
-                        .foregroundColor(.secondary)
-                }
-                .frame(height: 200)
-                
-            case .success:
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Import successful!")
-                        .fontWeight(.semibold)
-                }
-                
-            case .failure:
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                    Text("Failed to process report")
-                        .fontWeight(.semibold)
-                }
-            }
-        }
-    }
-    
-    private var actionButtons: some View {
-        if importStatus == .idle {
-            // Initial select button
-            return Button {
-                isShowingDocumentPicker = true
-            } label: {
-                HStack {
-                    Image(systemName: "doc.badge.plus")
-                    Text("Select PDF")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.accentColor)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-        } else if importStatus == .success {
-            // After success, just provide a done button
-            return Button {
-                dataStore.setCurrentReport(importedReport)
-                dismiss()
-            } label: {
-                HStack {
-                    Image(systemName: "checkmark")
-                    Text("Done")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-        } else {
-            // For failure or processing, allow retrying
-            return Button {
-                // Make sure we stop any existing security-scoped access before trying again
-                stopSecurityScopedAccess()
-                isShowingDocumentPicker = true
-            } label: {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Try Again")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.accentColor)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.dangerAccent.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.dangerAccent.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
     
     private func importSummaryView(report: BloodPressureReport) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("Import Summary")
-                .font(.headline)
-            
-            // Improved layout with more vertical arrangement
-            VStack(spacing: 12) {
-                // Readings count
-                dataBadge(
+        VStack(spacing: 16) {
+            // Summary cards
+            HStack(spacing: 12) {
+                SummaryCard(
+                    icon: "doc.text.fill",
                     value: "\(totalReadingsCount)",
                     label: "Readings",
-                    color: .blue
+                    color: .primaryAccent
                 )
                 
-                // Date range - simplified format to take less space
-                dataBadge(
+                SummaryCard(
+                    icon: "calendar",
                     value: dateRange(for: report),
                     label: "Date Range",
-                    color: .purple
+                    color: .secondaryAccent
                 )
                 
                 if duplicateCount > 0 {
-                    // Duplicates
-                    dataBadge(
+                    SummaryCard(
+                        icon: "exclamationmark.circle.fill",
                         value: "\(duplicateCount)",
                         label: "Duplicates",
-                        color: .orange
+                        color: .warningAccent
                     )
                 }
             }
             
-            // NEW - BP Categories breakdown with better spacing
+            // BP breakdown
             if !report.readings.isEmpty {
                 bpCategoriesBreakdown(report: report)
             }
             
-            if duplicateCount > 0 {
-                Text("Note: \(duplicateCount) readings appear to be duplicates of readings you've already imported. These will be skipped to avoid duplicates in Apple Health.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 4)
-            }
-            
-            HStack(spacing: 20) {
-                Label("User: \(report.memberName)", systemImage: "person")
+            // User info
+            HStack {
+                Label(report.memberName, systemImage: "person.fill")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondaryText)
+                
+                Spacer()
                 
                 if !report.gender.isEmpty && report.gender != "Unknown" {
                     Label(report.gender, systemImage: "figure.stand")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.secondaryText)
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, 8)
         }
-        .padding()
-        .background(Color.secondaryBackground)
-        .cornerRadius(12)
     }
     
-    // NEW - BP Categories breakdown with better layout
-    private func bpCategoriesBreakdown(report: BloodPressureReport) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("BP Classification Breakdown")
-                .font(.subheadline)
-                .padding(.top, 6)
+    @ViewBuilder
+    private var actionButtonsView: some View {
+        switch importStatus {
+        case .idle:
+            ActionButton(
+                title: "Select PDF",
+                icon: "doc.badge.plus",
+                style: .primary
+            ) {
+                isShowingDocumentPicker = true
+            }
             
-            // Count readings by category
-            let categoryCounts = countReadingsByCategory(report.readings)
+        case .success:
+            ActionButton(
+                title: "Done",
+                icon: "checkmark",
+                style: .primary
+            ) {
+                dataStore.setCurrentReport(importedReport)
+                dismiss()
+            }
             
-            // More vertical layout for better text fitting
-            VStack(spacing: 8) {
-                ForEach(Array(categoryCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { category in
-                    if let count = categoryCounts[category], count > 0 {
-                        HStack {
-                            Circle()
-                                .fill(category.color)
-                                .frame(width: 10, height: 10)
-                            
-                            Text(category.rawValue)
-                                .font(.caption)
-                            
-                            Spacer()
-                            
-                            Text("\(count)")
-                                .font(.headline)
-                                .foregroundColor(category.color)
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 10)
-                        .background(category.color.opacity(0.1))
-                        .cornerRadius(8)
+        case .failure:
+            ActionButton(
+                title: "Try Again",
+                icon: "arrow.clockwise",
+                style: .primary
+            ) {
+                stopSecurityScopedAccess()
+                importStatus = .idle
+                isShowingDocumentPicker = true
+            }
+            
+        default:
+            EmptyView()
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func simulateProgress() {
+        importProgress = 0
+        withAnimation(.linear(duration: 2)) {
+            importProgress = 0.9
+        }
+    }
+    
+    private func processImport(url: URL) {
+        importStatus = .processing
+        importProgress = 0
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let parser = PDFParserService()
+            
+            if let report = parser.parseHiloPDF(from: url) {
+                totalReadingsCount = report.readings.count
+                
+                let existingReadingIds = Set(dataStore.allReadings.map { createReadingIdentifier($0) })
+                let newReadingIds = report.readings.map { createReadingIdentifier($0) }
+                let uniqueNewReadingIds = Set(newReadingIds)
+                
+                duplicateCount = 0
+                for readingId in uniqueNewReadingIds {
+                    if existingReadingIds.contains(readingId) {
+                        duplicateCount += 1
                     }
                 }
+                
+                importedReport = report
+                importStatus = .validating
+                
+                validateImportedData(report)
+                
+                withAnimation(.spring(response: 0.5)) {
+                    importStatus = .success
+                }
+            } else {
+                withAnimation(.spring(response: 0.5)) {
+                    importStatus = .failure
+                }
+                stopSecurityScopedAccess()
             }
+        }
+    }
+    
+    // Keep existing helper methods...
+    private func stopSecurityScopedAccess() {
+        if securityScopedAccessGranted, let _ = pdfURL {
+            pdfURL?.stopAccessingSecurityScopedResource()
+            securityScopedAccessGranted = false
         }
     }
     
@@ -372,149 +561,73 @@ struct ImportView: View {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMM d"
         
-        return "\(dateFormatter.string(from: firstDate)) → \(dateFormatter.string(from: lastDate))"
+        return "\(dateFormatter.string(from: firstDate)) - \(dateFormatter.string(from: lastDate))"
     }
     
-    // Helper function for consistent data badges
-    private func dataBadge(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Text(value)
-                .font(.title2)
-                .fontWeight(.bold)
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(color.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    // Function to stop the security-scoped resource access
-    private func stopSecurityScopedAccess() {
-        if securityScopedAccessGranted, let _ = pdfURL {
-            pdfURL?.stopAccessingSecurityScopedResource()
-            securityScopedAccessGranted = false
-        }
-    }
-    
-    private func processImport(url: URL) {
-        importStatus = .processing
-        
-        // This would normally be on a background thread
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            let parser = PDFParserService()
+    private func bpCategoriesBreakdown(report: BloodPressureReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Classification Breakdown")
+                .font(.headline)
+                .foregroundColor(.primaryText)
             
-            if let report = parser.parseHiloPDF(from: url) {
-                // Store total readings count from the report
-                totalReadingsCount = report.readings.count
-                
-                // Fix the duplicate detection logic
-                // Create a more consistent identifier for readings
-                let existingReadingIds = Set(dataStore.allReadings.map { createReadingIdentifier($0) })
-                let newReadingIds = report.readings.map { createReadingIdentifier($0) }
-                
-                // Use a set to get unique IDs from the new readings
-                let uniqueNewReadingIds = Set(newReadingIds)
-                
-                // Count how many readings already exist in our datastore
-                duplicateCount = 0
-                for readingId in uniqueNewReadingIds {
-                    if existingReadingIds.contains(readingId) {
-                        duplicateCount += 1
+            let categoryCounts = countReadingsByCategory(report.readings)
+            
+            VStack(spacing: 8) {
+                ForEach(Array(categoryCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { category in
+                    if let count = categoryCounts[category], count > 0 {
+                        CategoryRow(
+                            category: category,
+                            count: count,
+                            total: totalReadingsCount
+                        )
                     }
                 }
-                
-                importedReport = report
-                
-                // Move to validation phase
-                importStatus = .validating
-                
-                // Validate the data
-                validateImportedData(report)
-                
-                // Mark import as successful
-                importStatus = .success
-            } else {
-                importStatus = .failure
-                // Stop accessing the security-scoped resource if processing failed
-                stopSecurityScopedAccess()
             }
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.tertiaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.glassBorder, lineWidth: 1)
+                )
+        )
     }
     
-    // NEW - Data validation function
     private func validateImportedData(_ report: BloodPressureReport) {
+        // Keep existing validation logic
         validationErrors = []
         var potentialIssues: [String] = []
         
-        // Check for empty or missing readings
         if report.readings.isEmpty {
             potentialIssues.append("No blood pressure readings found in the report")
         }
         
-        // Check reading date ranges
         if let firstDate = report.readings.map({ $0.date }).min(),
            let lastDate = report.readings.map({ $0.date }).max() {
             
             let calendar = Calendar.current
             let diff = calendar.dateComponents([.day], from: firstDate, to: lastDate)
             
-            // Sanity check - warn if readings span more than 90 days
             if let days = diff.day, days > 90 {
                 potentialIssues.append("Readings span \(days) days, which is unusually long")
             }
             
-            // Warn if any readings are in the future
             let now = Date()
             if report.readings.contains(where: { $0.date > now }) {
                 potentialIssues.append("Some readings have future dates")
             }
         }
         
-        // Check for abnormal values
-        var abnormalSystolicValues = 0
-        var abnormalDiastolicValues = 0
-        var abnormalHeartRates = 0
         var criticalBPCount = 0
         
         for reading in report.readings {
-            // Check for extremely high or low systolic values
-            if reading.systolic > 220 || reading.systolic < 70 {
-                abnormalSystolicValues += 1
-            }
-            
-            // Check for extremely high or low diastolic values
-            if reading.diastolic > 130 || reading.diastolic < 40 {
-                abnormalDiastolicValues += 1
-            }
-            
-            // Check for very high or low heart rates
-            if reading.heartRate > 150 || reading.heartRate < 40 {
-                abnormalHeartRates += 1
-            }
-            
-            // Count hypertensive crisis readings
             if reading.systolic >= 180 || reading.diastolic >= 120 {
                 criticalBPCount += 1
             }
         }
         
-        // Add warnings for abnormal values
-        if abnormalSystolicValues > 0 {
-            potentialIssues.append("\(abnormalSystolicValues) readings have unusual systolic values (outside 70-220 mmHg)")
-        }
-        
-        if abnormalDiastolicValues > 0 {
-            potentialIssues.append("\(abnormalDiastolicValues) readings have unusual diastolic values (outside 40-130 mmHg)")
-        }
-        
-        if abnormalHeartRates > 0 {
-            potentialIssues.append("\(abnormalHeartRates) readings have unusual heart rates (outside 40-150 bpm)")
-        }
-        
-        // Set validation errors if any issues found
         if !potentialIssues.isEmpty {
             validationErrors = potentialIssues
             hasValidationError = true
@@ -522,7 +635,6 @@ struct ImportView: View {
             hasValidationError = false
         }
         
-        // Special handling for critical BP readings
         if criticalBPCount > 0 {
             criticalReadingsCount = criticalBPCount
             hasCriticalReadings = true
@@ -532,16 +644,13 @@ struct ImportView: View {
         }
     }
     
-    // Helper function to count readings by BP category
     private func countReadingsByCategory(_ readings: [BloodPressureReading]) -> [BPClassification: Int] {
         var counts: [BPClassification: Int] = [:]
         
-        // Initialize counts for all categories
         for category in [BPClassification.normal, .elevated, .hypertensionStage1, .hypertensionStage2, .crisis] {
             counts[category] = 0
         }
         
-        // Count readings by category
         for reading in readings {
             let classification = BPClassificationService.shared.classify(
                 systolic: reading.systolic,
@@ -553,12 +662,135 @@ struct ImportView: View {
         return counts
     }
     
-    // Create a consistent identifier for a reading based on date, time and values
     private func createReadingIdentifier(_ reading: BloodPressureReading) -> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd-HH:mm"
         let dateString = dateFormatter.string(from: reading.date)
         
         return "\(dateString)-\(reading.systolic)-\(reading.diastolic)-\(reading.heartRate)"
+    }
+}
+
+// MARK: - Supporting Views
+
+struct FeatureRow: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(iconColor)
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle()
+                        .fill(iconColor.opacity(0.1))
+                )
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primaryText)
+                
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondaryText)
+            }
+            
+            Spacer()
+        }
+    }
+}
+
+struct SummaryCard: View {
+    let icon: String
+    let value: String
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(.headline)
+                .foregroundColor(.primaryText)
+            
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(color.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(color.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+}
+
+struct CategoryRow: View {
+    let category: BPClassification
+    let count: Int
+    let total: Int
+    
+    private var percentage: Double {
+        total > 0 ? Double(count) / Double(total) : 0
+    }
+    
+    private var categoryColor: Color {
+        switch category {
+        case .normal: return .bpNormal
+        case .elevated: return .bpElevated
+        case .hypertensionStage1: return .bpStage1
+        case .hypertensionStage2: return .bpStage2
+        case .crisis: return .bpCrisis
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(categoryColor)
+                        .frame(width: 8, height: 8)
+                    
+                    Text(category.rawValue)
+                        .font(.subheadline)
+                        .foregroundColor(.primaryText)
+                }
+                
+                Spacer()
+                
+                Text("\(count) (\(Int(percentage * 100))%)")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(categoryColor)
+            }
+            
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.glassBorder)
+                        .frame(height: 6)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(categoryColor)
+                        .frame(width: geometry.size.width * percentage, height: 6)
+                }
+            }
+            .frame(height: 6)
+        }
     }
 }

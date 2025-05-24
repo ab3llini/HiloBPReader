@@ -6,107 +6,297 @@ struct SimpleBPChart: View {
     
     @State private var chartData: [BPChartPoint] = []
     @State private var dateRange: ClosedRange<Date> = Date()...Date()
-    @State private var scrollOffset: CGFloat = 0
+    @State private var selectedPoint: BPChartPoint?
+    @State private var showingTooltip = false
+    @State private var chartAnimationProgress: CGFloat = 0
     
     private let windowDays = 30
-    private let dayWidth: CGFloat = 12
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 16) {
+            // Chart header
             chartHeader
             
-            Chart(chartData) { point in
-                // Systolic points
-                if point.type == .systolic {
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value("Systolic", point.value)
-                    )
-                    .foregroundStyle(.red)
-                    .symbolSize(40)
-                }
-                
-                // Diastolic points
-                if point.type == .diastolic {
-                    PointMark(
-                        x: .value("Date", point.date),
-                        y: .value("Diastolic", point.value)
-                    )
-                    .foregroundStyle(.blue)
-                    .symbolSize(40)
-                }
-                
-                // Reference lines
-                RuleMark(y: .value("Normal Systolic", 120))
-                    .foregroundStyle(.green.opacity(0.3))
-                    .lineStyle(.init(lineWidth: 1, dash: [5]))
-                
-                RuleMark(y: .value("Normal Diastolic", 80))
-                    .foregroundStyle(.green.opacity(0.3))
-                    .lineStyle(.init(lineWidth: 1, dash: [5]))
-            }
-            .chartYScale(domain: 60...180)
-            .chartXScale(domain: dateRange)
-            .chartYAxis {
-                AxisMarks(values: [60, 80, 120, 140, 160, 180])
-            }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 7)) { value in
-                    if let date = value.as(Date.self) {
-                        AxisValueLabel {
-                            Text(date, format: .dateTime.month().day())
-                        }
-                    }
-                }
-            }
-            .frame(height: 200)
-            .chartScrollableAxes(.horizontal)
-            .chartXVisibleDomain(length: 30 * 24 * 60 * 60) // 30 days in seconds
-            .padding()
-            .background(Color.secondaryBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            // Main chart
+            chartView
+                .frame(height: 240)
+                .padding(.horizontal, 8)
             
-            // Stats summary
-            if !chartData.isEmpty {
-                statsView
+            // Legend
+            legendView
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(LinearGradient.cardGradient)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color.glassBorder, lineWidth: 1)
+                )
+        )
+        .cardShadow()
+        .padding(.horizontal, 20)
+        .onAppear {
+            updateChartData()
+            withAnimation(.easeOut(duration: 1)) {
+                chartAnimationProgress = 1
             }
         }
-        .padding(.horizontal)
-        .onAppear { updateChartData() }
         .onChange(of: readings) { _, _ in updateChartData() }
     }
     
     private var chartHeader: some View {
         HStack {
-            Text("30 Day Trend")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("30 Day Trend")
+                    .font(.headline)
+                    .foregroundColor(.primaryText)
+                
+                Text("Tap points for details")
+                    .font(.caption)
+                    .foregroundColor(.tertiaryText)
+            }
             
             Spacer()
             
-            // Legend
-            HStack(spacing: 16) {
-                Label("Systolic", systemImage: "circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                
-                Label("Diastolic", systemImage: "circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-            }
+            // View mode toggle could go here
         }
     }
     
-    private var statsView: some View {
-        let systolicData = chartData.filter { $0.type == .systolic }
-        let diastolicData = chartData.filter { $0.type == .diastolic }
+    private var chartView: some View {
+        Chart {
+            // Background reference zones
+            RectangleMark(
+                yStart: .value("Start", 0),
+                yEnd: .value("End", 120)
+            )
+            .foregroundStyle(Color.bpNormal.opacity(0.05))
+            
+            RectangleMark(
+                yStart: .value("Start", 120),
+                yEnd: .value("End", 130)
+            )
+            .foregroundStyle(Color.bpElevated.opacity(0.05))
+            
+            RectangleMark(
+                yStart: .value("Start", 130),
+                yEnd: .value("End", 140)
+            )
+            .foregroundStyle(Color.bpStage1.opacity(0.05))
+            
+            RectangleMark(
+                yStart: .value("Start", 140),
+                yEnd: .value("End", 180)
+            )
+            .foregroundStyle(Color.bpStage2.opacity(0.05))
+            
+            // Reference lines
+            RuleMark(y: .value("Normal", 120))
+                .foregroundStyle(Color.bpNormal.opacity(0.3))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text("Normal")
+                        .font(.caption2)
+                        .foregroundColor(.bpNormal)
+                        .padding(.horizontal, 4)
+                        .background(Color.primaryBackground.opacity(0.8))
+                        .cornerRadius(4)
+                }
+            
+            RuleMark(y: .value("Normal", 80))
+                .foregroundStyle(Color.bpNormal.opacity(0.3))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
+            
+            // Data points with animation
+            ForEach(chartData) { point in
+                if point.type == .systolic {
+                    // Line connecting systolic points
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Value", point.value * Double(chartAnimationProgress))
+                    )
+                    .foregroundStyle(LinearGradient.systolicGradient)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .interpolationMethod(.catmullRom)
+                    .opacity(0.3)
+                    
+                    // Systolic points
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("Value", point.value * Double(chartAnimationProgress))
+                    )
+                    .foregroundStyle(LinearGradient.systolicGradient)
+                    .symbolSize(selectedPoint?.id == point.id ? 120 : 60)
+                    .annotation(position: .top) {
+                        if selectedPoint?.id == point.id {
+                            tooltipView(for: point)
+                        }
+                    }
+                }
+                
+                if point.type == .diastolic {
+                    // Line connecting diastolic points
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Value", point.value * Double(chartAnimationProgress))
+                    )
+                    .foregroundStyle(LinearGradient.diastolicGradient)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .interpolationMethod(.catmullRom)
+                    .opacity(0.3)
+                    
+                    // Diastolic points
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("Value", point.value * Double(chartAnimationProgress))
+                    )
+                    .foregroundStyle(LinearGradient.diastolicGradient)
+                    .symbolSize(selectedPoint?.id == point.id ? 120 : 60)
+                }
+            }
+        }
+        .chartYScale(domain: 60...180)
+        .chartXScale(domain: dateRange)
+        .chartYAxis {
+            AxisMarks(values: [60, 80, 100, 120, 140, 160, 180]) { value in
+                AxisGridLine()
+                    .foregroundStyle(Color.glassBorder)
+                AxisValueLabel()
+                    .foregroundStyle(Color.secondaryText)
+                    .font(.caption)
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .day, count: 5)) { value in
+                if let date = value.as(Date.self) {
+                    AxisValueLabel {
+                        VStack(spacing: 2) {
+                            Text(date, format: .dateTime.day())
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Text(date, format: .dateTime.month(.abbreviated))
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Color.secondaryText)
+                    }
+                    AxisGridLine()
+                        .foregroundStyle(Color.glassBorder)
+                }
+            }
+        }
+        .chartBackground { chartProxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        handleChartTap(location: location, geometry: geometry, chartProxy: chartProxy)
+                    }
+            }
+        }
+        .chartScrollableAxes(.horizontal)
+        .chartXVisibleDomain(length: 30 * 24 * 60 * 60)
+    }
+    
+    private var legendView: some View {
+        HStack(spacing: 24) {
+            // Systolic legend
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(LinearGradient.systolicGradient)
+                    .frame(width: 12, height: 12)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Systolic")
+                        .font(.caption)
+                        .foregroundColor(.primaryText)
+                    
+                    if let avgSys = averageSystolic {
+                        Text("Avg: \(avgSys)")
+                            .font(.caption2)
+                            .foregroundColor(.secondaryText)
+                    }
+                }
+            }
+            
+            // Diastolic legend
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(LinearGradient.diastolicGradient)
+                    .frame(width: 12, height: 12)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Diastolic")
+                        .font(.caption)
+                        .foregroundColor(.primaryText)
+                    
+                    if let avgDia = averageDiastolic {
+                        Text("Avg: \(avgDia)")
+                            .font(.caption2)
+                            .foregroundColor(.secondaryText)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            // Chart info
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(filteredReadingsCount) readings")
+                    .font(.caption)
+                    .foregroundColor(.secondaryText)
+                
+                Text("Scroll for more →")
+                    .font(.caption2)
+                    .foregroundColor(.tertiaryText)
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+    
+    private func tooltipView(for point: BPChartPoint) -> some View {
+        VStack(spacing: 4) {
+            Text(point.date, format: .dateTime.month().day())
+                .font(.caption)
+                .fontWeight(.semibold)
+            
+            Text("\(Int(point.value)) \(point.type == .systolic ? "SYS" : "DIA")")
+                .font(.caption2)
+                .foregroundColor(point.type == .systolic ? Color.systolicGradientStart : Color.diastolicGradientStart)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.glassBorder, lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        .transition(.scale.combined(with: .opacity))
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func handleChartTap(location: CGPoint, geometry: GeometryProxy, chartProxy: ChartProxy) {
+        let xPosition = location.x - geometry.frame(in: .local).minX
+        let plotWidth = geometry.size.width
+        let dataPointCount = CGFloat(chartData.count / 2) // Divided by 2 because we have systolic and diastolic
         
-        let avgSystolic = systolicData.isEmpty ? 0 : Int(systolicData.map(\.value).reduce(0, +) / Double(systolicData.count))
-        let avgDiastolic = diastolicData.isEmpty ? 0 : Int(diastolicData.map(\.value).reduce(0, +) / Double(diastolicData.count))
+        guard dataPointCount > 0 else { return }
         
-        return HStack {
-            StatsBadge(title: "Avg Systolic", value: avgSystolic, color: .red)
-            StatsBadge(title: "Avg Diastolic", value: avgDiastolic, color: .blue)
-            StatsBadge(title: "Readings", value: readings.count, color: .secondary)
+        let pointIndex = Int((xPosition / plotWidth) * dataPointCount)
+        
+        if pointIndex >= 0 && pointIndex < chartData.count {
+            withAnimation(.spring(response: 0.3)) {
+                // Find the closest point
+                let targetDate = chartData[pointIndex].date
+                if let closest = chartData.min(by: { abs($0.date.timeIntervalSince(targetDate)) < abs($1.date.timeIntervalSince(targetDate)) }) {
+                    selectedPoint = selectedPoint?.id == closest.id ? nil : closest
+                }
+            }
         }
     }
     
@@ -117,7 +307,6 @@ struct SimpleBPChart: View {
         
         dateRange = startDate...endDate
         
-        // Filter and group readings by day
         let filteredReadings = readings.filter { $0.date >= startDate && $0.date <= endDate }
         
         var dailyData: [Date: (systolic: [Int], diastolic: [Int])] = [:]
@@ -131,7 +320,6 @@ struct SimpleBPChart: View {
             dailyData[day]?.diastolic.append(reading.diastolic)
         }
         
-        // Convert to chart points
         var points: [BPChartPoint] = []
         
         for (date, values) in dailyData {
@@ -148,8 +336,30 @@ struct SimpleBPChart: View {
         
         chartData = points.sorted { $0.date < $1.date }
     }
+    
+    // MARK: - Computed Properties
+    
+    private var averageSystolic: Int? {
+        let systolicData = chartData.filter { $0.type == .systolic }
+        guard !systolicData.isEmpty else { return nil }
+        return Int(systolicData.map(\.value).reduce(0, +) / Double(systolicData.count))
+    }
+    
+    private var averageDiastolic: Int? {
+        let diastolicData = chartData.filter { $0.type == .diastolic }
+        guard !diastolicData.isEmpty else { return nil }
+        return Int(diastolicData.map(\.value).reduce(0, +) / Double(diastolicData.count))
+    }
+    
+    private var filteredReadingsCount: Int {
+        let calendar = Calendar.current
+        let endDate = Date()
+        let startDate = calendar.date(byAdding: .day, value: -windowDays, to: endDate)!
+        return readings.filter { $0.date >= startDate && $0.date <= endDate }.count
+    }
 }
 
+// Keep the existing BPChartPoint struct
 struct BPChartPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -158,27 +368,5 @@ struct BPChartPoint: Identifiable {
     
     enum BPType {
         case systolic, diastolic
-    }
-}
-
-struct StatsBadge: View {
-    let title: String
-    let value: Int
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Text("\(value)")
-                .font(.headline)
-                .foregroundStyle(color)
-            
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
